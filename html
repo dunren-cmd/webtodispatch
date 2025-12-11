@@ -1,0 +1,811 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Users, 
+  Calendar, 
+  Mic, 
+  Bot, 
+  FileText, 
+  CheckCircle, 
+  AlertCircle, 
+  Clock, 
+  ChevronDown, 
+  ChevronUp, 
+  Plus, 
+  BarChart3, 
+  Upload, 
+  Image as ImageIcon,
+  Activity,
+  Stethoscope,
+  HeartPulse,
+  Briefcase,
+  Link as LinkIcon,
+  ExternalLink,
+  FolderOpen,
+  X
+} from 'lucide-react';
+
+// --- Mock Data & Constants ---
+
+const ROLES = [
+  { id: 'medical_admin', name: '醫務專員', icon: Briefcase, color: 'bg-blue-100 text-blue-700' },
+  { id: 'nurse', name: '護理師', icon: HeartPulse, color: 'bg-pink-100 text-pink-700' },
+  { id: 'ward_ops', name: '病房業務', icon: Activity, color: 'bg-green-100 text-green-700' },
+  { id: 'social_worker', name: '社工師', icon: Users, color: 'bg-orange-100 text-orange-700' },
+  { id: 'ot', name: '職能治療師', icon: Stethoscope, color: 'bg-purple-100 text-purple-700' },
+];
+
+const USERS = [
+  { id: 1, name: '陳主任', role: 'medical_admin', avatar: '👨‍⚕️' },
+  { id: 2, name: '林護理長', role: 'nurse', avatar: '👩‍⚕️' },
+  { id: 3, name: '張社工', role: 'social_worker', avatar: '🧑‍💼' },
+  { id: 4, name: '王治療師', role: 'ot', avatar: '🧘' },
+  { id: 5, name: '李專員', role: 'ward_ops', avatar: '👨‍💼' },
+  { id: 6, name: '吳協調員', role: 'medical_admin', avatar: '👩‍💼' },
+];
+
+const INITIAL_TASKS = [
+  {
+    id: 101,
+    title: 'Q4 病房滿意度調查分析',
+    description: '1. 收集各病房紙本問卷。\n2. 數位化數據並匯入系統。\n3. 針對低分項目提出改善計畫。',
+    assignerId: 1,
+    assigneeId: 5,
+    collaboratorIds: [2, 3],
+    roleCategory: 'ward_ops',
+    dates: {
+      plan: '2023-10-25',
+      interim: '2023-11-05',
+      final: '2023-11-15'
+    },
+    status: 'in_progress', // pending, in_progress, done, overdue
+    assigneeResponse: '目前已回收80%問卷，統計圖表已產出，請見附件。',
+    evidence: [
+      { id: 'e1', type: 'stat', label: '問卷回收率', value: '82%', trend: 'up' },
+      { id: 'e2', type: 'stat', label: '整體滿意度', value: '4.5', sub: '/ 5.0' },
+      { id: 'e3', type: 'image', name: '滿意度長條圖.png', url: 'https://via.placeholder.com/300x200?text=Chart+Preview' },
+      { id: 'e4', type: 'link', name: '原始數據_GoogleDrive', url: 'https://drive.google.com/drive/folders/...' }
+    ]
+  },
+  {
+    id: 102,
+    title: '職能治療室設備更新評估',
+    description: '評估現有復健器材折舊狀況，並尋找三家廠商報價。',
+    assignerId: 1,
+    assigneeId: 4,
+    collaboratorIds: [],
+    roleCategory: 'ot',
+    dates: {
+      plan: '2023-10-01',
+      interim: '2023-10-10',
+      final: '2023-10-20'
+    },
+    status: 'overdue',
+    assigneeResponse: '廠商報價單已上傳至共用資料夾。',
+    evidence: [
+        { id: 'e5', type: 'link', name: '廠商報價單資料夾', url: '#' }
+    ]
+  },
+    {
+    id: 103,
+    title: '居家護理訪視流程優化',
+    description: '針對出院後72小時內的訪視流程進行SOP修訂。',
+    assignerId: 2,
+    assigneeId: 2,
+    collaboratorIds: [3],
+    roleCategory: 'nurse',
+    dates: {
+      plan: '2023-11-01',
+      interim: '2023-11-10',
+      final: '2023-11-20'
+    },
+    status: 'done',
+    assigneeResponse: '已完成SOP v2.0版草案，經會議通過。',
+    evidence: [
+        { id: 'e6', type: 'image', name: '新版流程圖_v2.jpg', url: 'https://via.placeholder.com/300x400?text=SOP+Flowchart' }
+    ]
+  }
+];
+
+// --- Utility Functions ---
+
+const getStatusColor = (task) => {
+  const today = new Date().toISOString().split('T')[0];
+  if (task.status === 'done') return 'bg-emerald-50 text-emerald-900 border-emerald-200';
+  if (task.dates.final < today && task.status !== 'done') return 'bg-red-50 text-red-900 border-red-200';
+  if (task.status === 'in_progress') return 'bg-blue-50 text-blue-900 border-blue-200';
+  return 'bg-gray-50 text-gray-800 border-gray-200'; // Pending
+};
+
+const getStatusLabel = (task) => {
+  const today = new Date().toISOString().split('T')[0];
+  if (task.status === 'done') return '已完成';
+  if (task.dates.final < today && task.status !== 'done') return '已逾期';
+  if (task.status === 'in_progress') return '進行中';
+  return '待處理';
+};
+
+// --- Components ---
+
+const UserSelector = ({ label, users, selectedId, onSelect, multiple = false, selectedIds = [] }) => {
+  const handleSelect = (id) => {
+    if (multiple) {
+      if (selectedIds.includes(id)) {
+        onSelect(selectedIds.filter(uid => uid !== id));
+      } else {
+        onSelect([...selectedIds, id]);
+      }
+    } else {
+      onSelect(id);
+    }
+  };
+
+  return (
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
+      <div className="flex flex-wrap gap-2">
+        {users.map(user => {
+            const isSelected = multiple ? selectedIds.includes(user.id) : selectedId === user.id;
+            return (
+                <button
+                    key={user.id}
+                    onClick={() => handleSelect(user.id)}
+                    className={`flex items-center space-x-1 px-3 py-2 rounded-full border transition-all ${
+                    isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md transform scale-105'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                >
+                    <span className="text-lg">{user.avatar}</span>
+                    <span className="text-sm font-medium">{user.name}</span>
+                    {isSelected && <CheckCircle size={14} className="ml-1" />}
+                </button>
+            )
+        })}
+      </div>
+    </div>
+  );
+};
+
+const EvidenceDisplay = ({ evidence, onDelete }) => {
+    if (!evidence) return null;
+
+    if (evidence.type === 'stat') {
+        return (
+            <div className="bg-white border border-slate-200 rounded-lg p-3 flex flex-col items-center justify-center min-w-[120px] shadow-sm relative group">
+                {onDelete && <button onClick={onDelete} className="absolute top-1 right-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>}
+                <div className="text-xs text-slate-500 mb-1">{evidence.label}</div>
+                <div className="text-2xl font-bold text-indigo-600 flex items-baseline">
+                    {evidence.value}
+                    {evidence.sub && <span className="text-xs text-slate-400 ml-1 font-normal">{evidence.sub}</span>}
+                </div>
+                {evidence.trend && <div className="text-xs text-emerald-500 flex items-center mt-1">▲ 較上月成長</div>}
+            </div>
+        );
+    }
+
+    if (evidence.type === 'link') {
+        return (
+            <a href={evidence.url} target="_blank" rel="noreferrer" className="flex items-center bg-blue-50 border border-blue-100 rounded-lg p-3 text-blue-700 hover:bg-blue-100 transition-colors relative group min-w-[200px]">
+                {onDelete && (
+                    <button 
+                        onClick={(e) => { e.preventDefault(); onDelete(); }} 
+                        className="absolute top-1 right-1 text-blue-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                    >
+                        <X size={14}/>
+                    </button>
+                )}
+                <div className="bg-white p-2 rounded-full mr-3 shadow-sm">
+                    {evidence.name.includes('Folder') || evidence.name.includes('資料夾') ? <FolderOpen size={20} className="text-blue-500"/> : <LinkIcon size={20} className="text-blue-500"/>}
+                </div>
+                <div className="flex-1 overflow-hidden">
+                    <div className="text-xs text-blue-400 font-bold mb-0.5">Google Drive / 連結</div>
+                    <div className="text-sm font-medium truncate w-full">{evidence.name}</div>
+                </div>
+                <ExternalLink size={14} className="ml-2 opacity-50"/>
+            </a>
+        );
+    }
+
+    if (evidence.type === 'image') {
+        return (
+            <div className="relative group rounded-lg overflow-hidden border border-slate-200 shadow-sm">
+                <img src={evidence.url} alt={evidence.name} className="h-24 w-full object-cover transition-transform group-hover:scale-105" />
+                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all pointer-events-none"/>
+                {onDelete && (
+                    <button 
+                        onClick={onDelete} 
+                        className="absolute top-1 right-1 bg-white rounded-full p-1 text-slate-400 hover:text-red-500 shadow opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                        <X size={14}/>
+                    </button>
+                )}
+                <div className="absolute bottom-0 left-0 right-0 bg-white bg-opacity-90 px-2 py-1 text-xs truncate border-t">
+                    {evidence.name}
+                </div>
+            </div>
+        );
+    }
+    return null;
+};
+
+const TaskCard = ({ task, users, onUpdateStatus, onUpdateResponse, onAddEvidence, onDeleteEvidence }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [responseEdit, setResponseEdit] = useState(task.assigneeResponse || '');
+  const [isEditingResponse, setIsEditingResponse] = useState(false);
+
+  const assigner = users.find(u => u.id === task.assignerId);
+  const assignee = users.find(u => u.id === task.assigneeId);
+  const collaborators = users.filter(u => task.collaboratorIds.includes(u.id));
+
+  const handleSaveResponse = () => {
+    onUpdateResponse(task.id, responseEdit);
+    setIsEditingResponse(false);
+  };
+
+  return (
+    <div className={`mb-4 rounded-xl border-l-4 shadow-sm bg-white transition-all ${getStatusColor(task)} border-l-${getStatusColor(task).split('-')[1]}-500`}>
+      <div className="p-4">
+        {/* Header */}
+        <div className="flex justify-between items-start mb-3 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+          <div className="flex-1">
+            <div className="flex items-center space-x-2 mb-1">
+                <span className={`text-xs px-2 py-0.5 rounded border font-bold ${getStatusColor(task).replace('bg-white', '')}`}>
+                    {getStatusLabel(task)}
+                </span>
+                <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                    {ROLES.find(r => r.id === task.roleCategory)?.name || '未分類'}
+                </span>
+            </div>
+            <h3 className="text-lg font-bold text-slate-800">{task.title}</h3>
+          </div>
+          <button className="text-slate-400 hover:text-slate-600 ml-2">
+            {isExpanded ? <ChevronUp /> : <ChevronDown />}
+          </button>
+        </div>
+
+        {/* Quick People View */}
+        <div className="flex items-center space-x-4 text-sm text-slate-600 mb-4 bg-white bg-opacity-50 p-2 rounded-lg border border-slate-100">
+          <div className="flex items-center" title="交辦人">
+            <span className="text-xs text-slate-400 mr-1">交辦:</span>
+            <span>{assigner?.avatar} {assigner?.name}</span>
+          </div>
+          <div className="w-px h-4 bg-slate-300"></div>
+          <div className="flex items-center" title="承辦人">
+            <span className="text-xs text-slate-400 mr-1">承辦:</span>
+            <span>{assignee?.avatar} {assignee?.name}</span>
+          </div>
+        </div>
+
+        {/* Dates Preview (Always visible) */}
+        <div className="grid grid-cols-3 gap-2 mb-2 text-xs">
+            <div className="bg-white p-2 rounded border border-slate-100 text-center">
+                <div className="text-slate-400 mb-0.5 text-[10px]">計畫</div>
+                <div className="font-semibold text-slate-700">{task.dates.plan}</div>
+            </div>
+            <div className="bg-white p-2 rounded border border-orange-100 text-center">
+                <div className="text-slate-400 mb-0.5 text-[10px]">期中</div>
+                <div className="font-semibold text-orange-600">{task.dates.interim}</div>
+            </div>
+            <div className="bg-white p-2 rounded border border-red-100 text-center">
+                <div className="text-slate-400 mb-0.5 text-[10px]">最終</div>
+                <div className="font-semibold text-red-600">{task.dates.final}</div>
+            </div>
+        </div>
+
+        {/* Expandable Content */}
+        {isExpanded && (
+          <div className="mt-4 border-t pt-4 space-y-6 animate-fade-in">
+            
+            {/* 1. Task Description */}
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                <h4 className="text-xs font-bold text-slate-500 mb-2 flex items-center uppercase tracking-wider">
+                    <Bot size={14} className="mr-1 text-indigo-500"/> 任務說明 (AI 生成)
+                </h4>
+                <div className="text-sm text-slate-700 whitespace-pre-line leading-relaxed pl-1">
+                    {task.description}
+                </div>
+            </div>
+
+            {/* 2. Assignee Response */}
+            <div>
+                <h4 className="text-xs font-bold text-slate-500 mb-2 flex items-center justify-between uppercase tracking-wider">
+                    <span className="flex items-center">
+                        <Users size={14} className="mr-1 text-emerald-600"/> 
+                        承辦人回覆
+                    </span>
+                    {!isEditingResponse && (
+                        <button 
+                            onClick={() => setIsEditingResponse(true)}
+                            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                        >
+                            編輯內容
+                        </button>
+                    )}
+                </h4>
+                
+                {isEditingResponse ? (
+                    <div className="space-y-2">
+                        <textarea 
+                            className="w-full p-2 border rounded-md text-sm focus:ring-2 focus:ring-emerald-500"
+                            rows={3}
+                            value={responseEdit}
+                            onChange={(e) => setResponseEdit(e.target.value)}
+                            placeholder="請輸入辦理步驟..."
+                        />
+                        <div className="flex justify-end space-x-2">
+                            <button 
+                                onClick={() => setIsEditingResponse(false)}
+                                className="px-3 py-1 text-xs text-slate-500 hover:bg-slate-100 rounded"
+                            >
+                                取消
+                            </button>
+                            <button 
+                                onClick={handleSaveResponse}
+                                className="px-3 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                            >
+                                儲存
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <div 
+                        className="bg-white border border-slate-200 p-3 rounded-lg text-sm text-slate-600 min-h-[50px] cursor-pointer hover:border-emerald-300 transition-colors"
+                        onClick={() => setIsEditingResponse(true)}
+                    >
+                        {task.assigneeResponse || <span className="text-slate-400 italic">點擊此處輸入執行步驟...</span>}
+                    </div>
+                )}
+            </div>
+
+            {/* 3. Evidence & Stats (Key Feature Update) */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <h4 className="text-xs font-bold text-slate-700 mb-3 flex items-center justify-between uppercase tracking-wider">
+                    <span className="flex items-center">
+                        <BarChart3 size={16} className="mr-1.5 text-blue-600"/> 
+                        任務成果與佐證 (圖片/數據/連結)
+                    </span>
+                </h4>
+
+                {/* Action Buttons to Add Evidence */}
+                <div className="flex space-x-2 mb-4">
+                    <button 
+                        onClick={() => onAddEvidence(task.id, 'stat')}
+                        className="flex-1 bg-white border border-slate-200 text-slate-600 py-1.5 px-2 rounded hover:bg-slate-50 hover:text-indigo-600 transition-colors text-xs flex items-center justify-center font-medium"
+                    >
+                        <Activity size={14} className="mr-1"/> + 統計數據
+                    </button>
+                    <button 
+                        onClick={() => onAddEvidence(task.id, 'image')}
+                        className="flex-1 bg-white border border-slate-200 text-slate-600 py-1.5 px-2 rounded hover:bg-slate-50 hover:text-indigo-600 transition-colors text-xs flex items-center justify-center font-medium"
+                    >
+                        <ImageIcon size={14} className="mr-1"/> + 上傳圖片
+                    </button>
+                    <button 
+                        onClick={() => onAddEvidence(task.id, 'link')}
+                        className="flex-1 bg-white border border-slate-200 text-slate-600 py-1.5 px-2 rounded hover:bg-slate-50 hover:text-indigo-600 transition-colors text-xs flex items-center justify-center font-medium"
+                    >
+                        <LinkIcon size={14} className="mr-1"/> + Drive 連結
+                    </button>
+                </div>
+                
+                {/* Evidence Grid Display */}
+                <div className="flex flex-wrap gap-3">
+                    {task.evidence && task.evidence.length > 0 ? (
+                        task.evidence.map((ev) => (
+                            <EvidenceDisplay 
+                                key={ev.id} 
+                                evidence={ev} 
+                                onDelete={() => onDeleteEvidence(task.id, ev.id)}
+                            />
+                        ))
+                    ) : (
+                        <div className="w-full text-center text-xs text-slate-400 py-4 border-2 border-dashed border-slate-200 rounded-lg">
+                            尚無佐證資料，請點擊上方按鈕新增
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end pt-2">
+                {task.status !== 'done' && (
+                    <button 
+                        onClick={() => onUpdateStatus(task.id, 'done')}
+                        className="bg-emerald-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-emerald-700 flex items-center shadow-md transform active:scale-95 transition-all"
+                    >
+                        <CheckCircle size={16} className="mr-2"/> 
+                        確認任務完成
+                    </button>
+                )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ... CreateTaskForm remains similar, just hidden for brevity if not changed logic ...
+// Re-using the same CreateTaskForm but assuming it's imported or defined as in previous example.
+const CreateTaskForm = ({ users, onCancel, onCreate }) => {
+    // ... logic same as before ...
+    const [formData, setFormData] = useState({
+        title: '',
+        rawDescription: '',
+        aiDescription: '',
+        assignerId: null,
+        assigneeId: null,
+        collaboratorIds: [],
+        roleCategory: 'medical_admin',
+        dates: { plan: '', interim: '', final: '' }
+    });
+    
+    const [isListening, setIsListening] = useState(false);
+    const [isProcessingAI, setIsProcessingAI] = useState(false);
+
+    const simulateVoiceInput = () => {
+        setIsListening(true);
+        setTimeout(() => {
+            setIsListening(false);
+            setFormData(prev => ({
+                ...prev,
+                rawDescription: '請幫我請李專員去規劃一下這個季度的病房滿意度調查，然後記得要跟護理長還有社工一起討論，大概下個月中要給我結果，中間要先回報一次。'
+            }));
+        }, 1500);
+    };
+
+    const processWithAI = () => {
+        if (!formData.rawDescription) return;
+        setIsProcessingAI(true);
+        setTimeout(() => {
+            setIsProcessingAI(false);
+            setFormData(prev => ({
+                ...prev,
+                aiDescription: `根據口述內容生成工作任務：\n1. 規劃本季度病房滿意度調查計畫。\n2. 召集護理部與社工部進行跨部門協調會議。\n3. 執行調查並彙整數據報告。\n\n注意事項：需包含量化數據統計與質性回饋分析。`
+            }));
+        }, 1000);
+    };
+
+    const handleSubmit = () => {
+        if (!formData.title || !formData.assigneeId || !formData.dates.final) {
+            alert('請填寫完整資訊 (標題、承辦人、最終期限)');
+            return;
+        }
+        onCreate({
+            ...formData,
+            description: formData.aiDescription || formData.rawDescription,
+            status: 'pending',
+            evidence: []
+        });
+    };
+    
+    return (
+        <div className="bg-white rounded-xl shadow-lg border p-6 animate-fade-in">
+        <h2 className="text-xl font-bold mb-6 text-slate-800 flex items-center">
+            <Plus className="mr-2" /> 新增交辦任務
+        </h2>
+
+        {/* Roles Selection */}
+        <UserSelector 
+            label="1. 誰交辦？ (交辦人)" 
+            users={users} 
+            selectedId={formData.assignerId}
+            onSelect={(id) => setFormData({...formData, assignerId: id})}
+        />
+        
+        <UserSelector 
+            label="2. 交給誰？ (承辦人)" 
+            users={users} 
+            selectedId={formData.assigneeId}
+            onSelect={(id) => setFormData({...formData, assigneeId: id})}
+        />
+
+        <UserSelector 
+            label="3. 誰協助？ (協作者)" 
+            users={users} 
+            selectedIds={formData.collaboratorIds}
+            onSelect={(ids) => setFormData({...formData, collaboratorIds: ids})}
+            multiple={true}
+        />
+
+        <div className="mb-6">
+            <label className="block text-sm font-medium text-slate-700 mb-2">職類歸屬</label>
+            <div className="flex flex-wrap gap-2">
+                {ROLES.map(role => (
+                    <button
+                        key={role.id}
+                        onClick={() => setFormData({...formData, roleCategory: role.id})}
+                        className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                            formData.roleCategory === role.id 
+                            ? 'bg-slate-800 text-white' 
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                    >
+                        {role.name}
+                    </button>
+                ))}
+            </div>
+        </div>
+
+        {/* AI Voice Input */}
+        <div className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
+            <label className="block text-sm font-bold text-slate-700 mb-2">4. 任務描述 (AI 語音輔助)</label>
+            <div className="relative mb-3">
+                <textarea 
+                    className="w-full p-3 pr-12 border rounded-lg focus:ring-2 focus:ring-indigo-500 h-24"
+                    placeholder="點擊麥克風開始口述任務..."
+                    value={formData.rawDescription}
+                    onChange={(e) => setFormData({...formData, rawDescription: e.target.value})}
+                />
+                <button 
+                    onClick={simulateVoiceInput}
+                    className={`absolute right-3 top-3 p-2 rounded-full ${isListening ? 'bg-red-500 animate-pulse text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                >
+                    <Mic size={20} />
+                </button>
+            </div>
+            
+            <button 
+                onClick={processWithAI}
+                disabled={!formData.rawDescription || isProcessingAI}
+                className="w-full bg-indigo-600 text-white py-2 rounded-lg flex items-center justify-center hover:bg-indigo-700 disabled:opacity-50"
+            >
+                {isProcessingAI ? 'AI 分析中...' : <><Bot className="mr-2" size={18}/> 串接 AI 形成結構化工作任務</>}
+            </button>
+
+            {formData.aiDescription && (
+                <div className="mt-3 bg-white p-3 rounded border border-indigo-100">
+                    <div className="text-xs text-indigo-500 font-bold mb-1">AI 產出結果：</div>
+                    <textarea 
+                        className="w-full text-sm text-slate-700 border-none focus:ring-0 p-0 resize-none h-24"
+                        value={formData.aiDescription}
+                        onChange={(e) => setFormData({...formData, aiDescription: e.target.value})}
+                    />
+                </div>
+            )}
+        </div>
+
+        {/* Basic Info */}
+        <div className="mb-6">
+            <label className="block text-sm font-medium text-slate-700 mb-2">任務標題</label>
+            <input 
+                type="text" 
+                className="w-full p-2 border rounded-lg"
+                value={formData.title}
+                onChange={(e) => setFormData({...formData, title: e.target.value})}
+                placeholder="例如：Q3 職安回報"
+            />
+        </div>
+
+        {/* Dates */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">計畫執行規劃日期</label>
+                <input 
+                    type="date" 
+                    className="w-full p-2 border rounded"
+                    value={formData.dates.plan}
+                    onChange={(e) => setFormData({...formData, dates: { ...formData.dates, plan: e.target.value }})}
+                />
+            </div>
+            <div>
+                <label className="block text-xs font-bold text-orange-600 mb-1">期中回報日期</label>
+                <input 
+                    type="date" 
+                    className="w-full p-2 border rounded border-orange-200"
+                    value={formData.dates.interim}
+                    onChange={(e) => setFormData({...formData, dates: { ...formData.dates, interim: e.target.value }})}
+                />
+            </div>
+            <div>
+                <label className="block text-xs font-bold text-red-600 mb-1">最終結果回報日期</label>
+                <input 
+                    type="date" 
+                    className="w-full p-2 border rounded border-red-200"
+                    value={formData.dates.final}
+                    onChange={(e) => setFormData({...formData, dates: { ...formData.dates, final: e.target.value }})}
+                />
+            </div>
+        </div>
+
+        <div className="flex space-x-3">
+            <button onClick={onCancel} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-lg font-medium hover:bg-slate-200">
+                取消
+            </button>
+            <button onClick={handleSubmit} className="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
+                確認交辦
+            </button>
+        </div>
+    </div>
+    );
+};
+
+// --- Main Application ---
+
+export default function App() {
+  const [view, setView] = useState('dashboard');
+  const [tasks, setTasks] = useState(INITIAL_TASKS);
+  const [selectedRole, setSelectedRole] = useState('all');
+  const [stats, setStats] = useState({ total: 0, done: 0, overdue: 0 });
+
+  useEffect(() => {
+    const roleTasks = selectedRole === 'all' 
+        ? tasks 
+        : tasks.filter(t => t.roleCategory === selectedRole);
+    
+    const today = new Date().toISOString().split('T')[0];
+    const done = roleTasks.filter(t => t.status === 'done').length;
+    const overdue = roleTasks.filter(t => t.status !== 'done' && t.dates.final < today).length;
+    
+    setStats({
+        total: roleTasks.length,
+        done,
+        overdue
+    });
+  }, [tasks, selectedRole]);
+
+  const handleCreateTask = (newTaskData) => {
+    const newTask = {
+        id: Date.now(),
+        ...newTaskData
+    };
+    setTasks([newTask, ...tasks]);
+    setView('dashboard');
+  };
+
+  const handleUpdateStatus = (taskId, status) => {
+    setTasks(tasks.map(t => t.id === taskId ? { ...t, status } : t));
+  };
+
+  const handleUpdateResponse = (taskId, response) => {
+    setTasks(tasks.map(t => t.id === taskId ? { ...t, assigneeResponse: response, status: 'in_progress' } : t));
+  };
+
+  const handleDeleteEvidence = (taskId, evidenceId) => {
+    setTasks(tasks.map(t => {
+        if (t.id === taskId) {
+            return { ...t, evidence: t.evidence.filter(e => e.id !== evidenceId) };
+        }
+        return t;
+    }));
+  };
+
+  const handleAddEvidence = (taskId, type) => {
+    let newEvidence = null;
+    const id = Date.now().toString();
+
+    if (type === 'stat') {
+        const val = prompt('請輸入統計數值 (例如: 85%)', '90%');
+        const label = prompt('請輸入數值標籤 (例如: 完成率)', '達成率');
+        if (val && label) {
+            newEvidence = { id, type: 'stat', label, value: val };
+        }
+    } else if (type === 'link') {
+        const url = prompt('請輸入 Google Drive 連結', 'https://drive.google.com/...');
+        const name = prompt('請輸入資料夾名稱', '專案佐證資料夾');
+        if (url && name) {
+            newEvidence = { id, type: 'link', name, url };
+        }
+    } else if (type === 'image') {
+        // Simulating upload
+        newEvidence = { 
+            id, 
+            type: 'image', 
+            name: '上傳圖片.jpg', 
+            url: 'https://via.placeholder.com/300x200?text=Uploaded+Image' 
+        };
+        alert('已模擬圖片上傳');
+    }
+
+    if (newEvidence) {
+        setTasks(tasks.map(t => t.id === taskId ? { ...t, evidence: [...t.evidence, newEvidence] } : t));
+    }
+  };
+
+  const filteredTasks = useMemo(() => {
+    if (selectedRole === 'all') return tasks;
+    return tasks.filter(t => t.roleCategory === selectedRole);
+  }, [tasks, selectedRole]);
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20">
+      
+      {/* Top Header */}
+      <header className="bg-gradient-to-r from-indigo-700 to-indigo-600 text-white sticky top-0 z-20 shadow-lg">
+        <div className="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
+            <div>
+                <h1 className="text-xl font-bold flex items-center">
+                    <Activity className="mr-2" /> 
+                    任務交辦暨統計儀表板
+                </h1>
+                <p className="text-xs text-indigo-200 mt-1">智慧化成果管理系統</p>
+            </div>
+            <button 
+                onClick={() => setView(view === 'dashboard' ? 'create' : 'dashboard')}
+                className="bg-white text-indigo-700 px-4 py-2 rounded-full font-bold shadow-md hover:bg-indigo-50 transition-colors flex items-center transform hover:scale-105 active:scale-95"
+            >
+                {view === 'dashboard' ? <><Plus size={18} className="mr-1"/> 交辦任務</> : '返回總表'}
+            </button>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-4 py-6">
+        
+        {view === 'create' ? (
+            <CreateTaskForm 
+                users={USERS} 
+                onCancel={() => setView('dashboard')}
+                onCreate={handleCreateTask}
+            />
+        ) : (
+            <div className="animate-fade-in">
+                
+                {/* Stats Dashboard */}
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
+                        <div className="text-3xl font-bold text-slate-700">{stats.total}</div>
+                        <div className="text-xs text-slate-500 uppercase tracking-wide">總任務數</div>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
+                        <div className="text-3xl font-bold text-emerald-600">{Math.round((stats.done / stats.total || 0) * 100)}%</div>
+                        <div className="text-xs text-slate-500 uppercase tracking-wide">完成率</div>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center relative overflow-hidden">
+                        {stats.overdue > 0 && <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-ping m-2"></div>}
+                        <div className={`text-3xl font-bold ${stats.overdue > 0 ? 'text-red-600' : 'text-slate-700'}`}>{stats.overdue}</div>
+                        <div className="text-xs text-slate-500 uppercase tracking-wide">逾期/警示</div>
+                    </div>
+                </div>
+
+                {/* Role Filter Tabs */}
+                <div className="flex overflow-x-auto space-x-2 mb-6 pb-2 no-scrollbar">
+                    <button 
+                        onClick={() => setSelectedRole('all')}
+                        className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all ${selectedRole === 'all' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 shadow-sm'}`}
+                    >
+                        總覽
+                    </button>
+                    {ROLES.map(role => (
+                        <button
+                            key={role.id}
+                            onClick={() => setSelectedRole(role.id)}
+                            className={`flex-shrink-0 flex items-center px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                                selectedRole === role.id 
+                                ? role.color.replace('bg-', 'bg-').replace('text-', 'text-white bg-opacity-100 bg-') 
+                                : 'bg-white text-slate-600 shadow-sm'
+                            } ${selectedRole === role.id ? 'ring-2 ring-offset-1 ring-slate-300' : ''}`}
+                            style={selectedRole === role.id ? { backgroundColor: 'var(--tw-bg-opacity)' } : {}}
+                        >
+                            <role.icon size={14} className="mr-2"/>
+                            {role.name}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Task List */}
+                <div className="space-y-4">
+                    {filteredTasks.length === 0 ? (
+                        <div className="text-center py-12 text-slate-400">
+                            <FileText size={48} className="mx-auto mb-2 opacity-50"/>
+                            <p>目前該分類沒有任務</p>
+                        </div>
+                    ) : (
+                        filteredTasks.map(task => (
+                            <TaskCard 
+                                key={task.id} 
+                                task={task} 
+                                users={USERS}
+                                onUpdateStatus={handleUpdateStatus}
+                                onUpdateResponse={handleUpdateResponse}
+                                onAddEvidence={handleAddEvidence}
+                                onDeleteEvidence={handleDeleteEvidence}
+                            />
+                        ))
+                    )}
+                </div>
+            </div>
+        )}
+      </main>
+    </div>
+  );
+}
