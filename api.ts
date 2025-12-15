@@ -1,9 +1,15 @@
 // ========================================
-// API 服務 - 用於與 Google Apps Script 後端通訊
+// API 服務 - 用於與 Supabase 後端通訊
 // ========================================
 
-// Google Apps Script Web App URL（請替換為你的 Web App URL）
-const API_URL = 'https://script.google.com/macros/s/AKfycbzpdPkr96-Kc36TAYU3poKqOw2Do6GpXi6AMgJWgUDft9uD8EBoGyw4-VRJOgiiMAqZKw/exec';
+// Supabase 配置
+// 注意：這些值應該從環境變數或配置檔案讀取，這裡為了簡化直接寫在程式碼中
+// 在生產環境中，建議使用環境變數
+const SUPABASE_URL = 'http://192.168.68.75:54321'; // 本地 Supabase API 服務（端口 54321）
+const SUPABASE_ANON_KEY = 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH'; // 從 supabase status 取得的 Publishable key
+
+// Supabase REST API 基礎 URL
+const API_BASE_URL = `${SUPABASE_URL}/rest/v1`;
 
 // ========================================
 // 型別定義
@@ -54,6 +60,93 @@ export interface ApiResponse<T = any> {
 }
 
 // ========================================
+// Supabase API 輔助函數
+// ========================================
+
+/**
+ * 取得 Supabase API Key（從 localStorage 或使用預設值）
+ */
+function getSupabaseKey(): string {
+  // 嘗試從 localStorage 讀取
+  const storedKey = localStorage.getItem('supabase_anon_key');
+  if (storedKey) {
+    return storedKey;
+  }
+  
+  // 如果沒有，使用預設值（需要手動設定）
+  if (SUPABASE_ANON_KEY) {
+    return SUPABASE_ANON_KEY;
+  }
+  
+  // 提示用戶設定
+  console.warn('⚠️ Supabase API Key 未設定！請執行以下步驟：');
+  console.warn('1. 執行 supabase status 取得 Publishable key');
+  console.warn('2. 在瀏覽器 Console 中執行：localStorage.setItem("supabase_anon_key", "你的Publishable key")');
+  console.warn('3. 或直接編輯 api.ts 設定 SUPABASE_ANON_KEY');
+  console.warn('');
+  console.warn('注意：Supabase CLI 新版本使用 "Publishable key" 而不是 "anon key"');
+  
+  return '';
+}
+
+/**
+ * 建立 Supabase API 請求標頭
+ */
+function createHeaders(): HeadersInit {
+  const key = getSupabaseKey();
+  return {
+    'apikey': key,
+    'Authorization': `Bearer ${key}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
+  };
+}
+
+/**
+ * 轉換 Supabase 任務資料格式為前端格式
+ */
+function transformTaskFromSupabase(task: any): Task {
+  return {
+    id: task.id,
+    title: task.title || '',
+    description: task.description || '',
+    assignerId: task.assigner_id || null,
+    assigneeId: task.assignee_id || null,
+    collaboratorIds: task.collaborator_ids || [],
+    roleCategory: task.role_category || '',
+    dates: {
+      plan: task.plan_date || '',
+      interim: task.interim_date || '',
+      final: task.final_date || ''
+    },
+    status: task.status || 'pending',
+    assigneeResponse: task.assignee_response || '',
+    evidence: task.evidence || []
+  };
+}
+
+/**
+ * 轉換前端任務資料格式為 Supabase 格式
+ */
+function transformTaskToSupabase(task: Partial<Task>): any {
+  return {
+    id: task.id || Date.now(),
+    title: task.title || '',
+    description: task.description || '',
+    assigner_id: task.assignerId || null,
+    assignee_id: task.assigneeId || null,
+    collaborator_ids: task.collaboratorIds || [],
+    role_category: task.roleCategory || '',
+    plan_date: task.dates?.plan || null,
+    interim_date: task.dates?.interim || null,
+    final_date: task.dates?.final || null,
+    status: task.status || 'pending',
+    assignee_response: task.assigneeResponse || '',
+    evidence: task.evidence || []
+  };
+}
+
+// ========================================
 // API 函數
 // ========================================
 
@@ -62,49 +155,36 @@ export interface ApiResponse<T = any> {
  */
 export async function createTask(task: Omit<Task, 'id'>): Promise<ApiResponse<Task>> {
   try {
-    const taskData = {
-      action: 'createTask',
-      task: {
-        ...task,
-        id: Date.now() // 前端生成 ID
-      }
-    };
+    const taskData = transformTaskToSupabase({
+      ...task,
+      id: Date.now()
+    });
 
-    console.log('準備發送任務資料：', taskData);
+    console.log('準備發送任務資料到 Supabase：', taskData);
 
-    // Google Apps Script Web App 的特殊處理
-    // 移除 Content-Type header 以避免 CORS preflight 問題
-    const response = await fetch(API_URL, {
+    const response = await fetch(`${API_BASE_URL}/tasks`, {
       method: 'POST',
-      mode: 'no-cors', // 使用 no-cors 模式避免 CORS 問題
-      cache: 'no-cache',
-      redirect: 'follow',
+      headers: createHeaders(),
       body: JSON.stringify(taskData),
     });
 
-    // 注意：no-cors 模式下無法讀取回應，所以我們假設成功
-    // 實際的驗證需要透過重新載入任務列表來確認
-    console.log('請求已發送（no-cors 模式）');
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    const result = await response.json();
+    const createdTask = Array.isArray(result) ? result[0] : result;
     
-    // 返回成功回應，實際驗證透過重新載入資料
     return {
       success: true,
-      taskId: Date.now()
+      data: transformTaskFromSupabase(createdTask),
+      taskId: createdTask.id
     };
 
   } catch (error) {
     console.error('建立任務時發生錯誤：', error);
     const errorMessage = error instanceof Error ? error.message : '未知錯誤';
-    
-    // 檢查是否為 CORS 或網路錯誤
-    if (errorMessage.includes('Failed to fetch') || 
-        errorMessage.includes('NetworkError') ||
-        errorMessage.includes('CORS')) {
-      return {
-        success: false,
-        error: '無法連接到伺服器。請確認：\n1. Google Apps Script Web App 已正確部署\n2. 部署時選擇「具有存取權的使用者：任何人」\n3. 重新部署 Web App（每次修改 Code.gs 後都需要重新部署）\n4. 檢查瀏覽器 Console 的詳細錯誤訊息',
-      };
-    }
     
     return {
       success: false,
@@ -121,28 +201,18 @@ export async function updateTaskStatus(
   status: 'pending' | 'in_progress' | 'done' | 'overdue'
 ): Promise<ApiResponse> {
   try {
-    // Google Apps Script Web App 的特殊處理
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      cache: 'no-cache',
-      redirect: 'follow',
-      body: JSON.stringify({
-        action: 'updateTaskStatus',
-        taskId: taskId,
-        status: status
-      }),
+    const response = await fetch(`${API_BASE_URL}/tasks?id=eq.${taskId}`, {
+      method: 'PATCH',
+      headers: createHeaders(),
+      body: JSON.stringify({ status }),
     });
-    
-    // no-cors 模式下無法讀取回應
-    return { success: true };
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
 
-    const result: ApiResponse = await response.json();
-    return result;
+    return { success: true };
   } catch (error) {
     console.error('更新任務狀態時發生錯誤：', error);
     return {
@@ -160,28 +230,27 @@ export async function updateTaskResponse(
   response: string
 ): Promise<ApiResponse> {
   try {
-    // Google Apps Script Web App 的特殊處理
-    const response_data = await fetch(API_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      cache: 'no-cache',
-      redirect: 'follow',
-      body: JSON.stringify({
-        action: 'updateTaskResponse',
-        taskId: taskId,
-        response: response
-      }),
-    });
+    const updateData: any = { assignee_response: response };
     
-    // no-cors 模式下無法讀取回應
-    return { success: true };
-
-    if (!response_data.ok) {
-      throw new Error(`HTTP error! status: ${response_data.status}`);
+    // 如果狀態還是 pending，同時更新為 in_progress
+    // 先取得當前任務狀態
+    const currentTask = await getTask(taskId);
+    if (currentTask.success && currentTask.data && currentTask.data.status === 'pending') {
+      updateData.status = 'in_progress';
     }
 
-    const result: ApiResponse = await response_data.json();
-    return result;
+    const apiResponse = await fetch(`${API_BASE_URL}/tasks?id=eq.${taskId}`, {
+      method: 'PATCH',
+      headers: createHeaders(),
+      body: JSON.stringify(updateData),
+    });
+
+    if (!apiResponse.ok) {
+      const errorText = await apiResponse.text();
+      throw new Error(`HTTP error! status: ${apiResponse.status}, message: ${errorText}`);
+    }
+
+    return { success: true };
   } catch (error) {
     console.error('更新承辦人回覆時發生錯誤：', error);
     return {
@@ -199,28 +268,29 @@ export async function addEvidence(
   evidence: Evidence
 ): Promise<ApiResponse<Evidence>> {
   try {
-    // Google Apps Script Web App 的特殊處理
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      cache: 'no-cache',
-      redirect: 'follow',
-      body: JSON.stringify({
-        action: 'addEvidence',
-        taskId: taskId,
-        evidence: evidence
-      }),
-    });
-    
-    // no-cors 模式下無法讀取回應
-    return { success: true, evidence: evidence };
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    // 先取得當前任務
+    const currentTask = await getTask(taskId);
+    if (!currentTask.success || !currentTask.data) {
+      throw new Error('找不到任務');
     }
 
-    const result: ApiResponse<Evidence> = await response.json();
-    return result;
+    // 取得現有的佐證資料
+    const evidenceArray = currentTask.data.evidence || [];
+    evidenceArray.push(evidence);
+
+    // 更新任務的佐證資料
+    const response = await fetch(`${API_BASE_URL}/tasks?id=eq.${taskId}`, {
+      method: 'PATCH',
+      headers: createHeaders(),
+      body: JSON.stringify({ evidence: evidenceArray }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    return { success: true, data: evidence };
   } catch (error) {
     console.error('新增佐證資料時發生錯誤：', error);
     return {
@@ -238,28 +308,30 @@ export async function deleteEvidence(
   evidenceId: string
 ): Promise<ApiResponse> {
   try {
-    // Google Apps Script Web App 的特殊處理
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      cache: 'no-cache',
-      redirect: 'follow',
-      body: JSON.stringify({
-        action: 'deleteEvidence',
-        taskId: taskId,
-        evidenceId: evidenceId
-      }),
-    });
-    
-    // no-cors 模式下無法讀取回應
-    return { success: true };
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    // 先取得當前任務
+    const currentTask = await getTask(taskId);
+    if (!currentTask.success || !currentTask.data) {
+      throw new Error('找不到任務');
     }
 
-    const result: ApiResponse = await response.json();
-    return result;
+    // 取得現有的佐證資料並過濾掉要刪除的
+    const evidenceArray = (currentTask.data.evidence || []).filter(
+      (e: Evidence) => e.id !== evidenceId
+    );
+
+    // 更新任務的佐證資料
+    const response = await fetch(`${API_BASE_URL}/tasks?id=eq.${taskId}`, {
+      method: 'PATCH',
+      headers: createHeaders(),
+      body: JSON.stringify({ evidence: evidenceArray }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    return { success: true };
   } catch (error) {
     console.error('刪除佐證資料時發生錯誤：', error);
     return {
@@ -274,21 +346,30 @@ export async function deleteEvidence(
  */
 export async function getTasks(roleCategory: string = 'all'): Promise<ApiResponse<Task[]>> {
   try {
-    const params = new URLSearchParams({
-      action: 'getTasks',
-      roleCategory: roleCategory
-    });
+    let url = `${API_BASE_URL}/tasks`;
+    
+    // 如果指定了職類，添加過濾條件
+    if (roleCategory && roleCategory !== 'all') {
+      url += `?role_category=eq.${roleCategory}`;
+    }
 
-    const response = await fetch(`${API_URL}?${params.toString()}`, {
+    const response = await fetch(url, {
       method: 'GET',
+      headers: createHeaders(),
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
 
-    const result: ApiResponse<Task[]> = await response.json();
-    return result;
+    const result = await response.json();
+    const tasks = Array.isArray(result) ? result : [];
+    
+    return {
+      success: true,
+      data: tasks.map(transformTaskFromSupabase)
+    };
   } catch (error) {
     console.error('取得任務列表時發生錯誤：', error);
     return {
@@ -304,21 +385,31 @@ export async function getTasks(roleCategory: string = 'all'): Promise<ApiRespons
  */
 export async function getTask(taskId: number): Promise<ApiResponse<Task>> {
   try {
-    const params = new URLSearchParams({
-      action: 'getTask',
-      taskId: taskId.toString()
-    });
-
-    const response = await fetch(`${API_URL}?${params.toString()}`, {
+    const response = await fetch(`${API_BASE_URL}/tasks?id=eq.${taskId}`, {
       method: 'GET',
+      headers: createHeaders(),
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
 
-    const result: ApiResponse<Task> = await response.json();
-    return result;
+    const result = await response.json();
+    
+    if (!result || (Array.isArray(result) && result.length === 0)) {
+      return {
+        success: false,
+        error: '找不到任務'
+      };
+    }
+
+    const task = Array.isArray(result) ? result[0] : result;
+    
+    return {
+      success: true,
+      data: transformTaskFromSupabase(task)
+    };
   } catch (error) {
     console.error('取得任務時發生錯誤：', error);
     return {
@@ -334,47 +425,41 @@ export async function getTask(taskId: number): Promise<ApiResponse<Task>> {
 export async function createUser(user: Omit<User, 'id'>): Promise<ApiResponse<User>> {
   try {
     const userData = {
-      action: 'createUser',
-      user: {
-        ...user,
-        id: Date.now() // 前端生成 ID
-      }
+      id: Date.now(),
+      name: user.name || '',
+      role: user.role || '',
+      avatar: user.avatar || '👤'
     };
 
-    console.log('準備發送員工資料：', userData);
+    console.log('準備發送員工資料到 Supabase：', userData);
 
-    // Google Apps Script Web App 的特殊處理
-    // 移除 Content-Type header 以避免 CORS preflight 問題
-    const response = await fetch(API_URL, {
+    const response = await fetch(`${API_BASE_URL}/users`, {
       method: 'POST',
-      mode: 'no-cors', // 使用 no-cors 模式避免 CORS 問題
-      cache: 'no-cache',
-      redirect: 'follow',
+      headers: createHeaders(),
       body: JSON.stringify(userData),
     });
 
-    // 注意：no-cors 模式下無法讀取回應，所以我們假設成功
-    // 實際的驗證需要透過重新載入員工列表來確認
-    console.log('請求已發送（no-cors 模式）');
-    
-    // 返回成功回應，實際驗證透過重新載入資料
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    const result = await response.json();
+    const createdUser = Array.isArray(result) ? result[0] : result;
+
     return {
       success: true,
-      userId: Date.now()
+      data: {
+        id: createdUser.id,
+        name: createdUser.name,
+        role: createdUser.role,
+        avatar: createdUser.avatar || '👤'
+      }
     };
 
   } catch (error) {
     console.error('建立員工時發生錯誤：', error);
     const errorMessage = error instanceof Error ? error.message : '未知錯誤';
-    
-    if (errorMessage.includes('Failed to fetch') || 
-        errorMessage.includes('NetworkError') ||
-        errorMessage.includes('CORS')) {
-      return {
-        success: false,
-        error: '無法連接到伺服器。請確認 Web App 已正確部署並選擇「任何人」可以存取',
-      };
-    }
     
     return {
       success: false,
@@ -385,52 +470,22 @@ export async function createUser(user: Omit<User, 'id'>): Promise<ApiResponse<Us
 
 /**
  * 使用 Gemini AI 分析任務描述
+ * 注意：這個功能需要透過 Google Apps Script，因為需要 Gemini API Key
+ * 如果 Google Apps Script 已設定，可以透過它來調用
  */
 export async function analyzeTaskWithAI(description: string): Promise<ApiResponse<{ description: string }>> {
   try {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      cache: 'no-cache',
-      redirect: 'follow',
-      body: JSON.stringify({
-        action: 'analyzeTaskWithAI',
-        description: description
-      }),
-    });
-
-    // no-cors 模式下無法讀取回應，需要改用 GET 方式或等待後重新查詢
-    // 這裡我們返回一個標記，讓前端知道請求已發送
-    console.log('AI 分析請求已發送');
+    // 如果 Google Apps Script URL 可用，使用它
+    // 否則返回提示訊息
+    const googleScriptUrl = 'https://script.google.com/macros/s/AKfycbzpdPkr96-Kc36TAYU3poKqOw2Do6GpXi6AMgJWgUDft9uD8EBoGyw4-VRJOgiiMAqZKw/exec';
     
-    // 由於 no-cors 限制，我們需要改用其他方式
-    // 暫時返回成功，實際結果需要透過其他方式取得
-    return {
-      success: true,
-      data: { description: 'AI 分析中，請稍候...' }
-    };
-  } catch (error) {
-    console.error('AI 分析時發生錯誤：', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : '未知錯誤',
-    };
-  }
-}
-
-/**
- * 使用 Gemini AI 分析任務描述（使用 GET 方式，透過 doGet 處理）
- */
-export async function analyzeTaskWithAIGet(description: string): Promise<ApiResponse<{ description: string }>> {
-  try {
-    // 使用 GET 方式，將描述編碼在 URL 中
     const encodedDescription = encodeURIComponent(description);
     const params = new URLSearchParams({
       action: 'analyzeTaskWithAI',
       description: encodedDescription
     });
 
-    const response = await fetch(`${API_URL}?${params.toString()}`, {
+    const response = await fetch(`${googleScriptUrl}?${params.toString()}`, {
       method: 'GET',
     });
 
@@ -450,24 +505,39 @@ export async function analyzeTaskWithAIGet(description: string): Promise<ApiResp
 }
 
 /**
+ * 使用 Gemini AI 分析任務描述（使用 GET 方式）
+ */
+export async function analyzeTaskWithAIGet(description: string): Promise<ApiResponse<{ description: string }>> {
+  return analyzeTaskWithAI(description);
+}
+
+/**
  * 取得人員列表
  */
 export async function getUsers(): Promise<ApiResponse<User[]>> {
   try {
-    const params = new URLSearchParams({
-      action: 'getUsers'
-    });
-
-    const response = await fetch(`${API_URL}?${params.toString()}`, {
+    const response = await fetch(`${API_BASE_URL}/users`, {
       method: 'GET',
+      headers: createHeaders(),
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
 
-    const result: ApiResponse<User[]> = await response.json();
-    return result;
+    const result = await response.json();
+    const users = Array.isArray(result) ? result : [];
+    
+    return {
+      success: true,
+      data: users.map((user: any) => ({
+        id: user.id,
+        name: user.name || '',
+        role: user.role || '',
+        avatar: user.avatar || '👤'
+      }))
+    };
   } catch (error) {
     console.error('取得人員列表時發生錯誤：', error);
     return {
@@ -477,4 +547,3 @@ export async function getUsers(): Promise<ApiResponse<User[]>> {
     };
   }
 }
-

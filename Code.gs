@@ -1,12 +1,13 @@
 // ========================================
 // 任務交辦系統 - Google Apps Script 後端
-// 用於接收前端 React 應用程式資料並儲存到 Google Sheets
+// 用於接收前端 React 應用程式資料並儲存到 Supabase
 // ========================================
 
-// Google Sheets ID（請替換為你的試算表 ID）
-const SPREADSHEET_ID = "1Y_DdF0sGFjSqCi9SPelZlkF6Mz32q5O0XNjdPOaq-c8";
-const TASKS_SHEET_NAME = "交辦紀錄";
-const USERS_SHEET_NAME = "人員管理_交辦";
+// Supabase 配置（請替換為你的 Supabase 專案資訊）
+const SUPABASE_URL = "http://192.168.68.75:54321"; // 本地 Supabase API 服務（端口 54321）
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY"; // 你的 Supabase Anon Key
+const SUPABASE_TABLE_TASKS = "tasks"; // 任務表名稱
+const SUPABASE_TABLE_USERS = "users"; // 用戶表名稱
 
 // ========================================
 // 處理 POST 請求（接收前端資料）
@@ -175,6 +176,98 @@ function doGet(e) {
 }
 
 // ========================================
+// Supabase API 輔助函數
+// ========================================
+
+/**
+ * 執行 Supabase REST API 請求
+ * @param {string} method - HTTP 方法 (GET, POST, PATCH, DELETE)
+ * @param {string} table - 表格名稱
+ * @param {object} data - 請求資料（可選）
+ * @param {string} filter - 查詢過濾條件（可選，例如：id=eq.1）
+ * @returns {object} API 回應資料
+ */
+function supabaseRequest(method, table, data = null, filter = '') {
+  try {
+    const config = getSupabaseConfig();
+    if (!config) {
+      throw new Error('Supabase 配置未設定，請設定 SUPABASE_URL 和 SUPABASE_ANON_KEY');
+    }
+    
+    const url = `${config.url}/rest/v1/${table}${filter ? '?' + filter : ''}`;
+    
+    const options = {
+      method: method,
+      headers: {
+        'apikey': config.key,
+        'Authorization': `Bearer ${config.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation' // 返回插入/更新的資料
+      },
+      muteHttpExceptions: true
+    };
+    
+    if (data && (method === 'POST' || method === 'PATCH')) {
+      options.payload = JSON.stringify(data);
+    }
+    
+    Logger.log(`📤 Supabase 請求：${method} ${url}`);
+    if (data) {
+      Logger.log(`📋 請求資料：${JSON.stringify(data)}`);
+    }
+    
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    
+    Logger.log(`📥 Supabase 回應狀態碼：${responseCode}`);
+    
+    if (responseCode >= 200 && responseCode < 300) {
+      // 成功回應
+      if (responseText) {
+        try {
+          return JSON.parse(responseText);
+        } catch (e) {
+          return [];
+        }
+      }
+      return [];
+    } else {
+      Logger.log(`❌ Supabase API 錯誤：${responseCode} - ${responseText}`);
+      throw new Error(`Supabase API 錯誤：${responseCode} - ${responseText}`);
+    }
+  } catch (error) {
+    Logger.log(`❌ Supabase 請求失敗：${error.toString()}`);
+    throw error;
+  }
+}
+
+/**
+ * 從指令碼屬性讀取 Supabase 配置
+ */
+function getSupabaseConfig() {
+  try {
+    const url = PropertiesService.getScriptProperties().getProperty('SUPABASE_URL');
+    const key = PropertiesService.getScriptProperties().getProperty('SUPABASE_ANON_KEY');
+    
+    if (url && key) {
+      return { url: url, key: key };
+    }
+    
+    // 如果指令碼屬性中沒有，使用常數（需要用戶設定）
+    if (SUPABASE_URL !== "YOUR_SUPABASE_URL" && SUPABASE_ANON_KEY !== "YOUR_SUPABASE_ANON_KEY") {
+      return { url: SUPABASE_URL, key: SUPABASE_ANON_KEY };
+    }
+    
+    Logger.log('⚠️ 找不到 Supabase 配置，請設定 SUPABASE_URL 和 SUPABASE_ANON_KEY');
+    return null;
+  } catch (error) {
+    Logger.log('❌ 讀取 Supabase 配置時發生錯誤：' + error.toString());
+    return null;
+  }
+}
+
+// ========================================
 // 建立回應（JSON 格式，包含 CORS headers）
 // ========================================
 function createResponse(data) {
@@ -190,83 +283,48 @@ function createResponse(data) {
 }
 
 // ========================================
-// 儲存任務到 Google Sheets
+// 儲存任務到 Supabase
 // ========================================
 function saveTask(taskData) {
-  Logger.log('📊 開始儲存任務到 Google Sheets...');
+  Logger.log('📊 開始儲存任務到 Supabase...');
   
   try {
-    // 開啟試算表
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(TASKS_SHEET_NAME);
-    
-    // 如果工作表不存在，則創建它
-    if (!sheet) {
-      sheet = ss.insertSheet(TASKS_SHEET_NAME);
-      // 設定標題列
-      const headers = [
-        '時間戳記',           // A欄
-        '任務ID',            // B欄
-        '任務標題',           // C欄
-        '任務描述',           // D欄
-        '交辦人ID',          // E欄
-        '交辦人姓名',         // F欄
-        '承辦人ID',          // G欄
-        '承辦人姓名',         // H欄
-        '協作者IDs',         // I欄（JSON 陣列）
-        '職類歸屬',          // J欄
-        '計畫日期',          // K欄
-        '期中日期',          // L欄
-        '最終日期',          // M欄
-        '狀態',             // N欄
-        '承辦人回覆',         // O欄
-        '佐證資料'           // P欄（JSON 陣列）
-      ];
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      // 設定標題列格式
-      sheet.getRange(1, 1, 1, headers.length)
-        .setFontWeight('bold')
-        .setBackground('#2563eb')
-        .setFontColor('white');
-    }
-    
     // 取得人員姓名
     const assignerName = getUserName(taskData.assignerId);
     const assigneeName = getUserName(taskData.assigneeId);
     
     // 準備要寫入的資料
-    const timestamp = new Date();
+    const timestamp = new Date().toISOString();
     const taskId = taskData.id || Date.now();
     
-    const rowData = [
-      timestamp,                                    // 時間戳記
-      taskId,                                       // 任務ID
-      taskData.title || '',                        // 任務標題
-      taskData.description || '',                  // 任務描述
-      taskData.assignerId || '',                   // 交辦人ID
-      assignerName,                                // 交辦人姓名
-      taskData.assigneeId || '',                   // 承辦人ID
-      assigneeName,                                // 承辦人姓名
-      JSON.stringify(taskData.collaboratorIds || []), // 協作者IDs（JSON）
-      taskData.roleCategory || '',                 // 職類歸屬
-      taskData.dates?.plan || '',                  // 計畫日期
-      taskData.dates?.interim || '',               // 期中日期
-      taskData.dates?.final || '',                 // 最終日期
-      taskData.status || 'pending',                // 狀態
-      taskData.assigneeResponse || '',             // 承辦人回覆
-      JSON.stringify(taskData.evidence || [])     // 佐證資料（JSON）
-    ];
+    const insertData = {
+      id: taskId,
+      timestamp: timestamp,
+      title: taskData.title || '',
+      description: taskData.description || '',
+      assigner_id: taskData.assignerId || null,
+      assigner_name: assignerName,
+      assignee_id: taskData.assigneeId || null,
+      assignee_name: assigneeName,
+      collaborator_ids: taskData.collaboratorIds || [],
+      role_category: taskData.roleCategory || '',
+      plan_date: taskData.dates?.plan || null,
+      interim_date: taskData.dates?.interim || null,
+      final_date: taskData.dates?.final || null,
+      status: taskData.status || 'pending',
+      assignee_response: taskData.assigneeResponse || '',
+      evidence: taskData.evidence || []
+    };
     
-    // 寫入資料
-    const lastRow = sheet.getLastRow();
-    sheet.getRange(lastRow + 1, 1, 1, rowData.length).setValues([rowData]);
+    // 插入資料到 Supabase
+    const result = supabaseRequest('POST', SUPABASE_TABLE_TASKS, insertData);
     
-    Logger.log('✅ 任務已成功儲存到第 ' + (lastRow + 1) + ' 列');
+    Logger.log('✅ 任務已成功儲存到 Supabase');
     
     return { 
       success: true, 
       taskId: taskId,
-      row: lastRow + 1 
+      data: result.length > 0 ? result[0] : insertData
     };
     
   } catch (error) {
@@ -282,28 +340,19 @@ function updateTaskStatus(taskId, status) {
   Logger.log('🔄 更新任務狀態：' + taskId + ' -> ' + status);
   
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(TASKS_SHEET_NAME);
+    const updateData = {
+      status: status
+    };
     
-    if (!sheet) {
-      throw new Error('找不到工作表：' + TASKS_SHEET_NAME);
+    const filter = `id=eq.${taskId}`;
+    const result = supabaseRequest('PATCH', SUPABASE_TABLE_TASKS, updateData, filter);
+    
+    if (result && result.length > 0) {
+      Logger.log('✅ 任務狀態已更新');
+      return { success: true, taskId: taskId, status: status, data: result[0] };
+    } else {
+      throw new Error('找不到任務 ID：' + taskId);
     }
-    
-    // 找到任務所在的行
-    const lastRow = sheet.getLastRow();
-    const taskIdColumn = 2; // B欄是任務ID
-    
-    for (let i = 2; i <= lastRow; i++) {
-      const cellValue = sheet.getRange(i, taskIdColumn).getValue();
-      if (cellValue == taskId) {
-        // 更新狀態（N欄，第14欄）
-        sheet.getRange(i, 14).setValue(status);
-        Logger.log('✅ 任務狀態已更新');
-        return { success: true, taskId: taskId, status: status };
-      }
-    }
-    
-    throw new Error('找不到任務 ID：' + taskId);
     
   } catch (error) {
     Logger.log('❌ 更新任務狀態時發生錯誤：' + error.toString());
@@ -318,33 +367,26 @@ function updateTaskResponse(taskId, response) {
   Logger.log('💬 更新承辦人回覆：' + taskId);
   
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(TASKS_SHEET_NAME);
+    // 先取得當前任務狀態
+    const currentTask = getTask(taskId);
+    let updateData = {
+      assignee_response: response
+    };
     
-    if (!sheet) {
-      throw new Error('找不到工作表：' + TASKS_SHEET_NAME);
+    // 如果狀態還是 pending，同時更新為 in_progress
+    if (currentTask.success && currentTask.data && currentTask.data.status === 'pending') {
+      updateData.status = 'in_progress';
     }
     
-    // 找到任務所在的行
-    const lastRow = sheet.getLastRow();
-    const taskIdColumn = 2; // B欄是任務ID
+    const filter = `id=eq.${taskId}`;
+    const result = supabaseRequest('PATCH', SUPABASE_TABLE_TASKS, updateData, filter);
     
-    for (let i = 2; i <= lastRow; i++) {
-      const cellValue = sheet.getRange(i, taskIdColumn).getValue();
-      if (cellValue == taskId) {
-        // 更新承辦人回覆（O欄，第15欄）
-        sheet.getRange(i, 15).setValue(response);
-        // 同時更新狀態為 in_progress（如果還是 pending）
-        const currentStatus = sheet.getRange(i, 14).getValue();
-        if (currentStatus === 'pending') {
-          sheet.getRange(i, 14).setValue('in_progress');
-        }
-        Logger.log('✅ 承辦人回覆已更新');
-        return { success: true, taskId: taskId };
-      }
+    if (result && result.length > 0) {
+      Logger.log('✅ 承辦人回覆已更新');
+      return { success: true, taskId: taskId, data: result[0] };
+    } else {
+      throw new Error('找不到任務 ID：' + taskId);
     }
-    
-    throw new Error('找不到任務 ID：' + taskId);
     
   } catch (error) {
     Logger.log('❌ 更新承辦人回覆時發生錯誤：' + error.toString());
@@ -359,43 +401,35 @@ function addEvidence(taskId, evidence) {
   Logger.log('📎 新增佐證資料：' + taskId);
   
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(TASKS_SHEET_NAME);
-    
-    if (!sheet) {
-      throw new Error('找不到工作表：' + TASKS_SHEET_NAME);
+    // 先取得當前任務
+    const currentTask = getTask(taskId);
+    if (!currentTask.success || !currentTask.data) {
+      throw new Error('找不到任務 ID：' + taskId);
     }
     
-    // 找到任務所在的行
-    const lastRow = sheet.getLastRow();
-    const taskIdColumn = 2; // B欄是任務ID
-    const evidenceColumn = 16; // P欄是佐證資料
-    
-    for (let i = 2; i <= lastRow; i++) {
-      const cellValue = sheet.getRange(i, taskIdColumn).getValue();
-      if (cellValue == taskId) {
-        // 取得現有的佐證資料
-        const evidenceJson = sheet.getRange(i, evidenceColumn).getValue();
-        let evidenceArray = [];
-        if (evidenceJson) {
-          try {
-            evidenceArray = JSON.parse(evidenceJson);
-          } catch (e) {
-            Logger.log('⚠️ 解析現有佐證資料失敗，使用空陣列');
-          }
-        }
-        
-        // 新增佐證資料
-        evidenceArray.push(evidence);
-        
-        // 寫回
-        sheet.getRange(i, evidenceColumn).setValue(JSON.stringify(evidenceArray));
-        Logger.log('✅ 佐證資料已新增');
-        return { success: true, taskId: taskId, evidence: evidence };
-      }
+    // 取得現有的佐證資料
+    let evidenceArray = currentTask.data.evidence || [];
+    if (!Array.isArray(evidenceArray)) {
+      evidenceArray = [];
     }
     
-    throw new Error('找不到任務 ID：' + taskId);
+    // 新增佐證資料
+    evidenceArray.push(evidence);
+    
+    // 更新任務
+    const updateData = {
+      evidence: evidenceArray
+    };
+    
+    const filter = `id=eq.${taskId}`;
+    const result = supabaseRequest('PATCH', SUPABASE_TABLE_TASKS, updateData, filter);
+    
+    if (result && result.length > 0) {
+      Logger.log('✅ 佐證資料已新增');
+      return { success: true, taskId: taskId, evidence: evidence, data: result[0] };
+    } else {
+      throw new Error('更新失敗');
+    }
     
   } catch (error) {
     Logger.log('❌ 新增佐證資料時發生錯誤：' + error.toString());
@@ -410,44 +444,35 @@ function deleteEvidence(taskId, evidenceId) {
   Logger.log('🗑️ 刪除佐證資料：' + taskId + ' -> ' + evidenceId);
   
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(TASKS_SHEET_NAME);
-    
-    if (!sheet) {
-      throw new Error('找不到工作表：' + TASKS_SHEET_NAME);
+    // 先取得當前任務
+    const currentTask = getTask(taskId);
+    if (!currentTask.success || !currentTask.data) {
+      throw new Error('找不到任務 ID：' + taskId);
     }
     
-    // 找到任務所在的行
-    const lastRow = sheet.getLastRow();
-    const taskIdColumn = 2; // B欄是任務ID
-    const evidenceColumn = 16; // P欄是佐證資料
-    
-    for (let i = 2; i <= lastRow; i++) {
-      const cellValue = sheet.getRange(i, taskIdColumn).getValue();
-      if (cellValue == taskId) {
-        // 取得現有的佐證資料
-        const evidenceJson = sheet.getRange(i, evidenceColumn).getValue();
-        let evidenceArray = [];
-        if (evidenceJson) {
-          try {
-            evidenceArray = JSON.parse(evidenceJson);
-          } catch (e) {
-            Logger.log('⚠️ 解析現有佐證資料失敗');
-            throw new Error('無法解析佐證資料');
-          }
-        }
-        
-        // 刪除指定的佐證資料
-        evidenceArray = evidenceArray.filter(e => e.id !== evidenceId);
-        
-        // 寫回
-        sheet.getRange(i, evidenceColumn).setValue(JSON.stringify(evidenceArray));
-        Logger.log('✅ 佐證資料已刪除');
-        return { success: true, taskId: taskId, evidenceId: evidenceId };
-      }
+    // 取得現有的佐證資料
+    let evidenceArray = currentTask.data.evidence || [];
+    if (!Array.isArray(evidenceArray)) {
+      evidenceArray = [];
     }
     
-    throw new Error('找不到任務 ID：' + taskId);
+    // 刪除指定的佐證資料
+    evidenceArray = evidenceArray.filter(e => e.id !== evidenceId);
+    
+    // 更新任務
+    const updateData = {
+      evidence: evidenceArray
+    };
+    
+    const filter = `id=eq.${taskId}`;
+    const result = supabaseRequest('PATCH', SUPABASE_TABLE_TASKS, updateData, filter);
+    
+    if (result && result.length > 0) {
+      Logger.log('✅ 佐證資料已刪除');
+      return { success: true, taskId: taskId, evidenceId: evidenceId, data: result[0] };
+    } else {
+      throw new Error('更新失敗');
+    }
     
   } catch (error) {
     Logger.log('❌ 刪除佐證資料時發生錯誤：' + error.toString());
@@ -462,70 +487,41 @@ function getTasks(roleCategory) {
   Logger.log('📋 查詢任務列表，職類：' + roleCategory);
   
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(TASKS_SHEET_NAME);
-    
-    if (!sheet) {
-      return { success: true, data: [] };
+    // 建立過濾條件
+    let filter = '';
+    if (roleCategory && roleCategory !== 'all') {
+      filter = `role_category=eq.${roleCategory}`;
     }
     
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-      return { success: true, data: [] };
-    }
+    // 查詢 Supabase
+    const result = supabaseRequest('GET', SUPABASE_TABLE_TASKS, null, filter);
     
-    // 讀取所有資料（跳過標題列）
-    const dataRange = sheet.getRange(2, 1, lastRow - 1, 16);
-    const values = dataRange.getValues();
-    
-    // 轉換為任務物件陣列
-    const tasks = values.map((row, index) => {
-      // 解析 JSON 欄位
-      let collaboratorIds = [];
-      let evidence = [];
-      
-      try {
-        if (row[8]) collaboratorIds = JSON.parse(row[8]);
-      } catch (e) {
-        Logger.log('⚠️ 解析協作者IDs失敗：' + row[8]);
-      }
-      
-      try {
-        if (row[15]) evidence = JSON.parse(row[15]);
-      } catch (e) {
-        Logger.log('⚠️ 解析佐證資料失敗：' + row[15]);
-      }
-      
+    // 轉換資料格式以符合前端期望
+    const tasks = result.map(task => {
       return {
-        id: row[1] || (index + 2),
-        title: row[2] || '',
-        description: row[3] || '',
-        assignerId: row[4] || null,
-        assigneeId: row[6] || null,
-        collaboratorIds: collaboratorIds,
-        roleCategory: row[9] || '',
+        id: task.id,
+        title: task.title || '',
+        description: task.description || '',
+        assignerId: task.assigner_id || null,
+        assigneeId: task.assignee_id || null,
+        collaboratorIds: task.collaborator_ids || [],
+        roleCategory: task.role_category || '',
         dates: {
-          plan: row[10] ? (row[10] instanceof Date ? row[10].toISOString().split('T')[0] : row[10]) : '',
-          interim: row[11] ? (row[11] instanceof Date ? row[11].toISOString().split('T')[0] : row[11]) : '',
-          final: row[12] ? (row[12] instanceof Date ? row[12].toISOString().split('T')[0] : row[12]) : ''
+          plan: task.plan_date ? (task.plan_date instanceof Date ? task.plan_date.toISOString().split('T')[0] : task.plan_date.split('T')[0]) : '',
+          interim: task.interim_date ? (task.interim_date instanceof Date ? task.interim_date.toISOString().split('T')[0] : task.interim_date.split('T')[0]) : '',
+          final: task.final_date ? (task.final_date instanceof Date ? task.final_date.toISOString().split('T')[0] : task.final_date.split('T')[0]) : ''
         },
-        status: row[13] || 'pending',
-        assigneeResponse: row[14] || '',
-        evidence: evidence
+        status: task.status || 'pending',
+        assigneeResponse: task.assignee_response || '',
+        evidence: task.evidence || []
       };
     });
     
-    // 根據職類過濾
-    let filteredTasks = tasks;
-    if (roleCategory && roleCategory !== 'all') {
-      filteredTasks = tasks.filter(t => t.roleCategory === roleCategory);
-    }
-    
-    Logger.log('✅ 查詢完成，總筆數：' + filteredTasks.length);
+    Logger.log('✅ 查詢完成，總筆數：' + tasks.length);
     
     return {
       success: true,
-      data: filteredTasks
+      data: tasks
     };
     
   } catch (error) {
@@ -545,54 +541,32 @@ function getTask(taskId) {
   Logger.log('📋 查詢任務：' + taskId);
   
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(TASKS_SHEET_NAME);
+    const filter = `id=eq.${taskId}`;
+    const result = supabaseRequest('GET', SUPABASE_TABLE_TASKS, null, filter);
     
-    if (!sheet) {
-      return { success: false, error: '找不到工作表' };
-    }
-    
-    const lastRow = sheet.getLastRow();
-    const taskIdColumn = 2; // B欄是任務ID
-    
-    for (let i = 2; i <= lastRow; i++) {
-      const cellValue = sheet.getRange(i, taskIdColumn).getValue();
-      if (cellValue == taskId) {
-        // 讀取整行資料
-        const row = sheet.getRange(i, 1, 1, 16).getValues()[0];
-        
-        // 解析 JSON 欄位
-        let collaboratorIds = [];
-        let evidence = [];
-        
-        try {
-          if (row[8]) collaboratorIds = JSON.parse(row[8]);
-        } catch (e) {}
-        
-        try {
-          if (row[15]) evidence = JSON.parse(row[15]);
-        } catch (e) {}
-        
-        const task = {
-          id: row[1] || taskId,
-          title: row[2] || '',
-          description: row[3] || '',
-          assignerId: row[4] || null,
-          assigneeId: row[6] || null,
-          collaboratorIds: collaboratorIds,
-          roleCategory: row[9] || '',
-          dates: {
-            plan: row[10] ? (row[10] instanceof Date ? row[10].toISOString().split('T')[0] : row[10]) : '',
-            interim: row[11] ? (row[11] instanceof Date ? row[11].toISOString().split('T')[0] : row[11]) : '',
-            final: row[12] ? (row[12] instanceof Date ? row[12].toISOString().split('T')[0] : row[12]) : ''
-          },
-          status: row[13] || 'pending',
-          assigneeResponse: row[14] || '',
-          evidence: evidence
-        };
-        
-        return { success: true, data: task };
-      }
+    if (result && result.length > 0) {
+      const task = result[0];
+      
+      // 轉換資料格式以符合前端期望
+      const formattedTask = {
+        id: task.id,
+        title: task.title || '',
+        description: task.description || '',
+        assignerId: task.assigner_id || null,
+        assigneeId: task.assignee_id || null,
+        collaboratorIds: task.collaborator_ids || [],
+        roleCategory: task.role_category || '',
+        dates: {
+          plan: task.plan_date ? (task.plan_date instanceof Date ? task.plan_date.toISOString().split('T')[0] : task.plan_date.split('T')[0]) : '',
+          interim: task.interim_date ? (task.interim_date instanceof Date ? task.interim_date.toISOString().split('T')[0] : task.interim_date.split('T')[0]) : '',
+          final: task.final_date ? (task.final_date instanceof Date ? task.final_date.toISOString().split('T')[0] : task.final_date.split('T')[0]) : ''
+        },
+        status: task.status || 'pending',
+        assigneeResponse: task.assignee_response || '',
+        evidence: task.evidence || []
+      };
+      
+      return { success: true, data: formattedTask };
     }
     
     return { success: false, error: '找不到任務' };
@@ -607,57 +581,33 @@ function getTask(taskId) {
 }
 
 // ========================================
-// 儲存員工資料到 Google Sheets
+// 儲存員工資料到 Supabase
 // ========================================
 function saveUser(userData) {
-  Logger.log('📊 開始儲存員工資料到 Google Sheets...');
+  Logger.log('📊 開始儲存員工資料到 Supabase...');
   
   try {
-    // 開啟試算表
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(USERS_SHEET_NAME);
-    
-    // 如果工作表不存在，則創建它
-    if (!sheet) {
-      sheet = ss.insertSheet(USERS_SHEET_NAME);
-      // 設定標題列
-      const headers = [
-        '時間戳記',           // A欄
-        '人員ID',            // B欄
-        '姓名',              // C欄
-        '角色',              // D欄
-        '頭像'               // E欄
-      ];
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      // 設定標題列格式
-      sheet.getRange(1, 1, 1, headers.length)
-        .setFontWeight('bold')
-        .setBackground('#2563eb')
-        .setFontColor('white');
-    }
-    
     // 準備要寫入的資料
-    const timestamp = new Date();
+    const timestamp = new Date().toISOString();
     const userId = userData.id || Date.now();
     
-    const rowData = [
-      timestamp,                    // 時間戳記
-      userId,                       // 人員ID
-      userData.name || '',          // 姓名
-      userData.role || '',          // 角色
-      userData.avatar || '👤'      // 頭像
-    ];
+    const insertData = {
+      id: userId,
+      timestamp: timestamp,
+      name: userData.name || '',
+      role: userData.role || '',
+      avatar: userData.avatar || '👤'
+    };
     
-    // 寫入資料
-    const lastRow = sheet.getLastRow();
-    sheet.getRange(lastRow + 1, 1, 1, rowData.length).setValues([rowData]);
+    // 插入資料到 Supabase
+    const result = supabaseRequest('POST', SUPABASE_TABLE_USERS, insertData);
     
-    Logger.log('✅ 員工資料已成功儲存到第 ' + (lastRow + 1) + ' 列');
+    Logger.log('✅ 員工資料已成功儲存到 Supabase');
     
     return { 
       success: true, 
       userId: userId,
-      row: lastRow + 1 
+      data: result.length > 0 ? result[0] : insertData
     };
     
   } catch (error) {
@@ -805,12 +755,22 @@ function getUsers() {
   Logger.log('👥 取得人員列表');
   
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(USERS_SHEET_NAME);
+    // 查詢 Supabase
+    const result = supabaseRequest('GET', SUPABASE_TABLE_USERS);
     
-    // 如果工作表不存在，返回預設人員列表
-    if (!sheet) {
-      Logger.log('⚠️ 找不到人員管理_交辦工作表，返回預設列表');
+    // 轉換資料格式
+    const users = result.map(user => {
+      return {
+        id: user.id,
+        name: user.name || '',
+        role: user.role || '',
+        avatar: user.avatar || '👤'
+      };
+    });
+    
+    // 如果沒有資料，返回預設人員列表
+    if (users.length === 0) {
+      Logger.log('⚠️ Supabase 中沒有人員資料，返回預設列表');
       return {
         success: true,
         data: [
@@ -824,24 +784,6 @@ function getUsers() {
       };
     }
     
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-      return { success: true, data: [] };
-    }
-    
-    // 讀取所有資料（假設欄位：時間戳記、人員ID、姓名、角色、頭像）
-    const dataRange = sheet.getRange(2, 1, lastRow - 1, 5);
-    const values = dataRange.getValues();
-    
-    const users = values.map((row, index) => {
-      return {
-        id: row[1] || (index + 1),
-        name: row[2] || '',
-        role: row[3] || '',
-        avatar: row[4] || '👤'
-      };
-    });
-    
     Logger.log('✅ 取得人員列表，總數：' + users.length);
     
     return {
@@ -851,10 +793,17 @@ function getUsers() {
     
   } catch (error) {
     Logger.log('❌ 取得人員列表時發生錯誤：' + error.toString());
+    // 發生錯誤時返回預設列表
     return {
-      success: false,
-      error: error.toString(),
-      data: []
+      success: true,
+      data: [
+        { id: 1, name: '陳主任', role: 'medical_admin', avatar: '👨‍⚕️' },
+        { id: 2, name: '林護理長', role: 'nurse', avatar: '👩‍⚕️' },
+        { id: 3, name: '張社工', role: 'social_worker', avatar: '🧑‍💼' },
+        { id: 4, name: '王治療師', role: 'ot', avatar: '🧘' },
+        { id: 5, name: '李專員', role: 'ward_ops', avatar: '👨‍💼' },
+        { id: 6, name: '吳協調員', role: 'medical_admin', avatar: '👩‍💼' }
+      ]
     };
   }
 }
@@ -865,22 +814,13 @@ function getUsers() {
 function getUserName(userId) {
   if (!userId) return '未指派';
   
-  // 先從人員管理_交辦工作表查詢
+  // 從 Supabase 查詢
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(USERS_SHEET_NAME);
+    const filter = `id=eq.${userId}`;
+    const result = supabaseRequest('GET', SUPABASE_TABLE_USERS, null, filter);
     
-    if (sheet) {
-      const lastRow = sheet.getLastRow();
-      const userIdColumn = 2; // 假設 B欄是人員ID
-      const nameColumn = 3; // 假設 C欄是姓名
-      
-      for (let i = 2; i <= lastRow; i++) {
-        const cellValue = sheet.getRange(i, userIdColumn).getValue();
-        if (cellValue == userId) {
-          return sheet.getRange(i, nameColumn).getValue() || userId;
-        }
-      }
+    if (result && result.length > 0) {
+      return result[0].name || userId;
     }
   } catch (e) {
     Logger.log('⚠️ 查詢人員姓名失敗：' + e.toString());
@@ -1003,7 +943,7 @@ function testGetDefault() {
 }
 
 /**
- * 測試基本設定 - 檢查試算表和工作表
+ * 測試基本設定 - 檢查 Supabase 連接
  */
 function testBasicSetup() {
   try {
@@ -1011,40 +951,29 @@ function testBasicSetup() {
     Logger.log('🔍 開始檢查基本設定...');
     Logger.log('========================================');
     
-    // 檢查試算表 ID
-    Logger.log('試算表 ID：' + SPREADSHEET_ID);
-    Logger.log('任務工作表名稱：' + TASKS_SHEET_NAME);
-    Logger.log('人員工作表名稱：' + USERS_SHEET_NAME);
-    
-    // 嘗試開啟試算表
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    Logger.log('✅ 成功開啟試算表：' + ss.getName());
-    
-    // 列出所有工作表
-    const sheets = ss.getSheets();
-    Logger.log('試算表中的工作表：');
-    sheets.forEach(function(sheet) {
-      Logger.log('  - ' + sheet.getName());
-    });
-    
-    // 檢查任務工作表
-    let taskSheet = ss.getSheetByName(TASKS_SHEET_NAME);
-    if (taskSheet) {
-      Logger.log('✅ 找到任務工作表：「' + TASKS_SHEET_NAME + '」');
-      Logger.log('   資料列數：' + taskSheet.getLastRow());
+    // 檢查 Supabase 配置
+    const config = getSupabaseConfig();
+    if (config) {
+      Logger.log('✅ Supabase URL：' + config.url);
+      Logger.log('✅ Supabase Key：' + (config.key ? config.key.substring(0, 20) + '...' : '未設定'));
     } else {
-      Logger.log('⚠️ 找不到任務工作表：「' + TASKS_SHEET_NAME + '」');
-      Logger.log('   程式會在首次建立任務時自動建立');
+      Logger.log('⚠️ Supabase 配置未設定');
+      Logger.log('請在指令碼屬性中設定：');
+      Logger.log('  - SUPABASE_URL');
+      Logger.log('  - SUPABASE_ANON_KEY');
     }
     
-    // 檢查人員工作表
-    let userSheet = ss.getSheetByName(USERS_SHEET_NAME);
-    if (userSheet) {
-      Logger.log('✅ 找到人員工作表：「' + USERS_SHEET_NAME + '」');
-      Logger.log('   資料列數：' + userSheet.getLastRow());
-    } else {
-      Logger.log('⚠️ 找不到人員工作表：「' + USERS_SHEET_NAME + '」');
-      Logger.log('   程式會在首次建立員工時自動建立');
+    Logger.log('任務表名稱：' + SUPABASE_TABLE_TASKS);
+    Logger.log('用戶表名稱：' + SUPABASE_TABLE_USERS);
+    
+    // 測試 Supabase 連接
+    try {
+      const testResult = supabaseRequest('GET', SUPABASE_TABLE_TASKS, null, 'limit=1');
+      Logger.log('✅ Supabase 連接成功');
+      Logger.log('   任務表查詢成功，返回 ' + testResult.length + ' 筆資料');
+    } catch (e) {
+      Logger.log('⚠️ Supabase 連接測試失敗：' + e.toString());
+      Logger.log('   請確認 Supabase URL 和 API Key 設定正確');
     }
     
     Logger.log('========================================');

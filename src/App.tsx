@@ -21,7 +21,11 @@ import {
   Link as LinkIcon,
   ExternalLink,
   FolderOpen,
-  X
+  X,
+  Settings,
+  Edit,
+  Trash2,
+  Save
 } from 'lucide-react';
 import { 
   createTask, 
@@ -40,13 +44,105 @@ import {
 
 // --- Constants ---
 
-const ROLES = [
-  { id: 'medical_admin', name: '醫務專員', icon: Briefcase, color: 'bg-blue-100 text-blue-700' },
-  { id: 'nurse', name: '護理師', icon: HeartPulse, color: 'bg-pink-100 text-pink-700' },
-  { id: 'ward_ops', name: '病房業務', icon: Activity, color: 'bg-green-100 text-green-700' },
-  { id: 'social_worker', name: '社工師', icon: Users, color: 'bg-orange-100 text-orange-700' },
-  { id: 'ot', name: '職能治療師', icon: Stethoscope, color: 'bg-purple-100 text-purple-700' },
+// 預設角色（系統內建，不可刪除）
+const DEFAULT_ROLES = [
+  { id: 'medical_admin', name: '醫務專員', icon: Briefcase, color: 'bg-blue-100 text-blue-700', isDefault: true },
+  { id: 'nurse', name: '護理師', icon: HeartPulse, color: 'bg-pink-100 text-pink-700', isDefault: true },
+  { id: 'ward_ops', name: '病房業務', icon: Activity, color: 'bg-green-100 text-green-700', isDefault: true },
+  { id: 'social_worker', name: '社工師', icon: Users, color: 'bg-orange-100 text-orange-700', isDefault: true },
+  { id: 'ot', name: '職能治療師', icon: Stethoscope, color: 'bg-purple-100 text-purple-700', isDefault: true },
 ];
+
+// 可用的圖示選項
+const AVAILABLE_ICONS = [
+  { name: 'Briefcase', icon: Briefcase },
+  { name: 'HeartPulse', icon: HeartPulse },
+  { name: 'Activity', icon: Activity },
+  { name: 'Users', icon: Users },
+  { name: 'Stethoscope', icon: Stethoscope },
+  { name: 'FileText', icon: FileText },
+  { name: 'Calendar', icon: Calendar },
+  { name: 'Settings', icon: Settings },
+];
+
+// 可用的顏色選項
+const COLOR_OPTIONS = [
+  { id: 'blue', name: '藍色', class: 'bg-blue-100 text-blue-700' },
+  { id: 'pink', name: '粉色', class: 'bg-pink-100 text-pink-700' },
+  { id: 'green', name: '綠色', class: 'bg-green-100 text-green-700' },
+  { id: 'orange', name: '橙色', class: 'bg-orange-100 text-orange-700' },
+  { id: 'purple', name: '紫色', class: 'bg-purple-100 text-purple-700' },
+  { id: 'indigo', name: '靛藍', class: 'bg-indigo-100 text-indigo-700' },
+  { id: 'red', name: '紅色', class: 'bg-red-100 text-red-700' },
+  { id: 'yellow', name: '黃色', class: 'bg-yellow-100 text-yellow-700' },
+  { id: 'teal', name: '青綠', class: 'bg-teal-100 text-teal-700' },
+  { id: 'cyan', name: '青色', class: 'bg-cyan-100 text-cyan-700' },
+];
+
+// 角色類型定義
+type Role = {
+  id: string;
+  name: string;
+  icon: any;
+  color: string;
+  isDefault?: boolean;
+};
+
+// 從 localStorage 載入自訂角色
+const loadCustomRoles = (): Role[] => {
+  try {
+    if (typeof window === 'undefined') return []; // SSR 保護
+    const stored = localStorage.getItem('custom_roles');
+    if (stored) {
+      const customRoles = JSON.parse(stored);
+      // 將 icon 字串轉換回元件
+      return customRoles.map((role: any) => {
+        const iconOption = AVAILABLE_ICONS.find(i => i.name === role.iconName);
+        return {
+          ...role,
+          icon: iconOption?.icon || Briefcase
+        };
+      });
+    }
+  } catch (error) {
+    console.error('載入自訂角色失敗：', error);
+  }
+  return [];
+};
+
+// 儲存自訂角色到 localStorage
+const saveCustomRoles = (roles: Role[]) => {
+  try {
+    if (typeof window === 'undefined') return; // SSR 保護
+    const customRoles = roles
+      .filter(r => !r.isDefault)
+      .map(role => {
+        // 找到對應的圖示名稱 - 通過比較函數引用或名稱
+        let iconName = 'Briefcase';
+        for (const iconOption of AVAILABLE_ICONS) {
+          if (iconOption.icon === role.icon) {
+            iconName = iconOption.name;
+            break;
+          }
+        }
+        return {
+          id: role.id,
+          name: role.name,
+          iconName: iconName,
+          color: role.color
+        };
+      });
+    localStorage.setItem('custom_roles', JSON.stringify(customRoles));
+  } catch (error) {
+    console.error('儲存自訂角色失敗：', error);
+  }
+};
+
+// 取得所有角色（預設 + 自訂）
+const getAllRoles = (): Role[] => {
+  const customRoles = loadCustomRoles();
+  return [...DEFAULT_ROLES, ...customRoles];
+};
 
 // --- Utility Functions ---
 
@@ -183,9 +279,10 @@ const EvidenceDisplay = ({ evidence, onDelete }: { evidence: Evidence; onDelete?
     return null;
 };
 
-const TaskCard = ({ task, users, onUpdateStatus, onUpdateResponse, onAddEvidence, onDeleteEvidence }: {
+const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddEvidence, onDeleteEvidence }: {
   task: Task;
   users: User[];
+  roles: Role[];
   onUpdateStatus: (taskId: number, status: Task['status']) => void;
   onUpdateResponse: (taskId: number, response: string) => void;
   onAddEvidence: (taskId: number, type: 'stat' | 'image' | 'link') => void;
@@ -214,7 +311,7 @@ const TaskCard = ({ task, users, onUpdateStatus, onUpdateResponse, onAddEvidence
                     {getStatusLabel(task)}
                 </span>
                 <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                    {ROLES.find(r => r.id === task.roleCategory)?.name || '未分類'}
+                    {roles.find(r => r.id === task.roleCategory)?.name || '未分類'}
                 </span>
             </div>
             <h3 className="text-lg font-bold text-slate-800">{task.title}</h3>
@@ -386,8 +483,9 @@ const TaskCard = ({ task, users, onUpdateStatus, onUpdateResponse, onAddEvidence
   );
 };
 
-const CreateTaskForm = ({ users, onCancel, onCreate }: {
+const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
   users: User[];
+  roles: Role[];
   onCancel: () => void;
   onCreate: (task: Omit<Task, 'id'>) => void;
 }) => {
@@ -493,19 +591,23 @@ const CreateTaskForm = ({ users, onCancel, onCreate }: {
         <div className="mb-6">
             <label className="block text-sm font-medium text-slate-700 mb-2">職類歸屬</label>
             <div className="flex flex-wrap gap-2">
-                {ROLES.map(role => (
-                    <button
-                        key={role.id}
-                        onClick={() => setFormData({...formData, roleCategory: role.id})}
-                        className={`px-3 py-1 text-sm rounded-full transition-colors ${
-                            formData.roleCategory === role.id 
-                            ? 'bg-slate-800 text-white' 
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                    >
-                        {role.name}
-                    </button>
-                ))}
+                {roles.map(role => {
+                    const RoleIcon = role.icon;
+                    return (
+                        <button
+                            key={role.id}
+                            onClick={() => setFormData({...formData, roleCategory: role.id})}
+                            className={`px-3 py-1 text-sm rounded-full transition-colors flex items-center ${
+                                formData.roleCategory === role.id 
+                                ? 'bg-slate-800 text-white' 
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                        >
+                            <RoleIcon size={14} className="mr-1" />
+                            {role.name}
+                        </button>
+                    );
+                })}
             </div>
         </div>
 
@@ -607,7 +709,7 @@ const CreateTaskForm = ({ users, onCancel, onCreate }: {
 // --- Employee Management Component ---
 
 const CreateUserForm = ({ roles, onCancel, onCreate }: {
-  roles: typeof ROLES;
+  roles: Role[];
   onCancel: () => void;
   onCreate: (user: Omit<User, 'id'>) => void;
 }) => {
@@ -714,10 +816,278 @@ const CreateUserForm = ({ roles, onCancel, onCreate }: {
   );
 };
 
+// --- Role Management Component ---
+
+const CreateRoleForm = ({ 
+  roles, 
+  onCancel, 
+  onSave,
+  editingRole 
+}: {
+  roles: Role[];
+  onCancel: () => void;
+  onSave: (role: Role) => void;
+  editingRole?: Role;
+}) => {
+  const getIconName = (iconComponent: any): string => {
+    if (!iconComponent) return 'Briefcase';
+    // 嘗試通過名稱匹配
+    const matched = AVAILABLE_ICONS.find(i => {
+      return i.icon === iconComponent || i.icon.name === iconComponent?.name;
+    });
+    return matched?.name || 'Briefcase';
+  };
+
+  const [formData, setFormData] = useState({
+    id: editingRole?.id || '',
+    name: editingRole?.name || '',
+    icon: editingRole?.icon || Briefcase,
+    color: editingRole?.color || 'bg-blue-100 text-blue-700',
+    iconName: editingRole ? getIconName(editingRole.icon) : 'Briefcase'
+  });
+
+  const handleSubmit = () => {
+    if (!formData.name || !formData.id) {
+      alert('請填寫完整資訊 (角色ID、角色名稱)');
+      return;
+    }
+
+    // 檢查 ID 是否已存在（編輯時排除自己）
+    const existingRole = roles.find(r => r.id === formData.id && (!editingRole || r.id !== editingRole.id));
+    if (existingRole) {
+      alert('此角色 ID 已存在，請使用其他 ID');
+      return;
+    }
+
+    const selectedIcon = AVAILABLE_ICONS.find(i => i.name === formData.iconName)?.icon || Briefcase;
+    
+    onSave({
+      id: formData.id,
+      name: formData.name,
+      icon: selectedIcon,
+      color: formData.color,
+      isDefault: false
+    });
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-lg border p-6 animate-fade-in">
+      <h2 className="text-xl font-bold mb-6 text-slate-800 flex items-center">
+        <Settings className="mr-2" /> {editingRole ? '編輯角色' : '新增角色'}
+      </h2>
+
+      {/* 角色 ID */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-slate-700 mb-2">
+          角色 ID * <span className="text-xs text-slate-400">(英文，用於系統識別，例如: admin, manager)</span>
+        </label>
+        <input 
+          type="text" 
+          className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          value={formData.id}
+          onChange={(e) => setFormData({...formData, id: e.target.value.toLowerCase().replace(/\s+/g, '_')})}
+          placeholder="例如: admin, manager, coordinator"
+          disabled={!!editingRole} // 編輯時不允許修改 ID
+        />
+        {editingRole && (
+          <p className="text-xs text-slate-400 mt-1">角色 ID 無法修改</p>
+        )}
+      </div>
+
+      {/* 角色名稱 */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-slate-700 mb-2">角色名稱 *</label>
+        <input 
+          type="text" 
+          className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          value={formData.name}
+          onChange={(e) => setFormData({...formData, name: e.target.value})}
+          placeholder="例如: 管理員、協調員"
+        />
+      </div>
+
+      {/* 圖示選擇 */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-slate-700 mb-2">圖示</label>
+        <div className="grid grid-cols-4 gap-3">
+          {AVAILABLE_ICONS.map(iconOption => (
+            <button
+              key={iconOption.name}
+              onClick={() => setFormData({...formData, icon: iconOption.icon, iconName: iconOption.name})}
+              className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center ${
+                formData.iconName === iconOption.name
+                ? 'border-indigo-500 bg-indigo-50'
+                : 'border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <iconOption.icon size={20} className="mb-1" />
+              <span className="text-xs text-slate-600">{iconOption.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 顏色選擇 */}
+      <div className="mb-8">
+        <label className="block text-sm font-medium text-slate-700 mb-2">顏色主題</label>
+        <div className="grid grid-cols-5 gap-2">
+          {COLOR_OPTIONS.map(colorOption => (
+            <button
+              key={colorOption.id}
+              onClick={() => setFormData({...formData, color: colorOption.class})}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                formData.color === colorOption.class
+                ? 'ring-2 ring-indigo-500 ring-offset-2'
+                : ''
+              } ${colorOption.class}`}
+            >
+              {colorOption.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex space-x-3">
+        <button onClick={onCancel} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-lg font-medium hover:bg-slate-200">
+          取消
+        </button>
+        <button onClick={handleSubmit} className="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
+          <Save size={18} className="inline mr-2" />
+          {editingRole ? '儲存變更' : '確認新增'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const RoleManagementView = ({ 
+  roles, 
+  users,
+  onAddRole,
+  onEditRole,
+  onDeleteRole,
+  onBack 
+}: {
+  roles: Role[];
+  users: User[];
+  onAddRole: () => void;
+  onEditRole: (role: Role) => void;
+  onDeleteRole: (roleId: string) => void;
+  onBack: () => void;
+}) => {
+  const handleDelete = (role: Role) => {
+    if (role.isDefault) {
+      alert('系統預設角色無法刪除');
+      return;
+    }
+
+    // 檢查是否有員工使用此角色
+    const usersWithRole = users.filter(u => u.role === role.id);
+    if (usersWithRole.length > 0) {
+      alert(`無法刪除：仍有 ${usersWithRole.length} 位員工使用此角色\n請先修改這些員工的角色設定`);
+      return;
+    }
+
+    if (confirm(`確定要刪除角色「${role.name}」嗎？`)) {
+      onDeleteRole(role.id);
+    }
+  };
+
+  return (
+    <div className="animate-fade-in">
+      <div className="mb-6 flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-slate-800 flex items-center">
+          <Settings className="mr-2" /> 角色管理
+        </h2>
+        <div className="flex space-x-2">
+          <button
+            onClick={onBack}
+            className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg font-medium hover:bg-slate-200"
+          >
+            返回
+          </button>
+          <button
+            onClick={onAddRole}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-indigo-700 flex items-center"
+          >
+            <Plus size={18} className="mr-1"/> 新增角色
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {roles.map(role => {
+          const usersWithRole = users.filter(u => u.role === role.id);
+          const IconComponent = role.icon;
+          
+          return (
+            <div 
+              key={role.id} 
+              className={`bg-white rounded-xl shadow-sm border-2 p-4 hover:shadow-md transition-shadow ${
+                role.isDefault ? 'border-slate-300' : 'border-indigo-200'
+              }`}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center space-x-3 flex-1">
+                  <div className={`p-2 rounded-lg ${role.color}`}>
+                    <IconComponent size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-slate-800">{role.name}</h3>
+                    <p className="text-xs text-slate-500">ID: {role.id}</p>
+                    {role.isDefault && (
+                      <span className="inline-block mt-1 text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                        系統預設
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <div className="text-xs text-slate-500 mb-1">使用此角色的員工：</div>
+                <div className="text-sm font-semibold text-indigo-600">
+                  {usersWithRole.length} 人
+                </div>
+              </div>
+
+              {!role.isDefault && (
+                <div className="flex space-x-2 pt-3 border-t border-slate-100">
+                  <button
+                    onClick={() => onEditRole(role)}
+                    className="flex-1 bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded text-sm font-medium hover:bg-indigo-100 flex items-center justify-center"
+                  >
+                    <Edit size={14} className="mr-1" /> 編輯
+                  </button>
+                  <button
+                    onClick={() => handleDelete(role)}
+                    className="flex-1 bg-red-50 text-red-600 px-3 py-1.5 rounded text-sm font-medium hover:bg-red-100 flex items-center justify-center"
+                    disabled={usersWithRole.length > 0}
+                  >
+                    <Trash2 size={14} className="mr-1" /> 刪除
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // --- Main Application ---
 
 export default function App() {
-  const [view, setView] = useState<'dashboard' | 'create' | 'users' | 'create-user'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'create' | 'users' | 'create-user' | 'roles' | 'create-role' | 'edit-role'>('dashboard');
+  const [roles, setRoles] = useState<Role[]>(() => {
+    try {
+      return getAllRoles();
+    } catch (error) {
+      console.error('初始化角色失敗：', error);
+      return DEFAULT_ROLES;
+    }
+  });
   const [tasks, setTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedRole, setSelectedRole] = useState('all');
@@ -765,10 +1135,16 @@ export default function App() {
     }
   };
 
+  // 載入角色
+  const loadRoles = () => {
+    setRoles(getAllRoles());
+  };
+
   // 初始載入
   useEffect(() => {
     const init = async () => {
       setLoading(true);
+      loadRoles(); // 載入角色
       await Promise.all([loadUsers(), loadTasks()]);
       setLoading(false);
     };
@@ -886,6 +1262,33 @@ export default function App() {
     }
   };
 
+  const handleSaveRole = (role: Role) => {
+    const isEditing = roles.some(r => r.id === role.id && !r.isDefault);
+    let updatedRoles: Role[];
+
+    if (isEditing) {
+      // 編輯現有角色
+      updatedRoles = roles.map(r => r.id === role.id && !r.isDefault ? role : r);
+    } else {
+      // 新增角色
+      updatedRoles = [...roles, role];
+    }
+
+    setRoles(updatedRoles);
+    saveCustomRoles(updatedRoles);
+    setView('roles');
+    alert(isEditing ? '角色已更新！' : '角色已新增！');
+  };
+
+  const handleDeleteRole = (roleId: string) => {
+    const updatedRoles = roles.filter(r => r.id !== roleId);
+    setRoles(updatedRoles);
+    saveCustomRoles(updatedRoles);
+    alert('角色已刪除！');
+  };
+
+  const [editingRole, setEditingRole] = useState<Role | undefined>(undefined);
+
   const handleAddEvidence = async (taskId: number, type: 'stat' | 'image' | 'link') => {
     let newEvidence: Evidence | null = null;
     const id = Date.now().toString();
@@ -959,6 +1362,12 @@ export default function App() {
             </div>
             <div className="flex space-x-2">
               <button 
+                  onClick={() => setView('roles')}
+                  className="bg-white text-indigo-700 px-4 py-2 rounded-full font-bold shadow-md hover:bg-indigo-50 transition-colors flex items-center transform hover:scale-105 active:scale-95"
+              >
+                  <Settings size={18} className="mr-1"/> 角色管理
+              </button>
+              <button 
                   onClick={() => setView('users')}
                   className="bg-white text-indigo-700 px-4 py-2 rounded-full font-bold shadow-md hover:bg-indigo-50 transition-colors flex items-center transform hover:scale-105 active:scale-95"
               >
@@ -978,7 +1387,8 @@ export default function App() {
         
         {view === 'create' ? (
             <CreateTaskForm 
-                users={users} 
+                users={users}
+                roles={roles}
                 onCancel={() => setView('dashboard')}
                 onCreate={handleCreateTask}
             />
@@ -1014,7 +1424,7 @@ export default function App() {
                         <div className="flex-1">
                           <h3 className="font-bold text-slate-800">{user.name}</h3>
                           <p className="text-sm text-slate-500">
-                            {ROLES.find(r => r.id === user.role)?.name || user.role}
+                            {roles.find(r => r.id === user.role)?.name || user.role}
                           </p>
                         </div>
                       </div>
@@ -1025,9 +1435,31 @@ export default function App() {
             </div>
         ) : view === 'create-user' ? (
             <CreateUserForm 
-              roles={ROLES}
+              roles={roles}
               onCancel={() => setView('users')}
               onCreate={handleCreateUser}
+            />
+        ) : view === 'roles' ? (
+            <RoleManagementView
+              roles={roles}
+              users={users}
+              onAddRole={() => {
+                setEditingRole(undefined);
+                setView('create-role');
+              }}
+              onEditRole={(role) => {
+                setEditingRole(role);
+                setView('edit-role');
+              }}
+              onDeleteRole={handleDeleteRole}
+              onBack={() => setView('dashboard')}
+            />
+        ) : view === 'create-role' || view === 'edit-role' ? (
+            <CreateRoleForm
+              roles={roles}
+              editingRole={editingRole}
+              onCancel={() => setView('roles')}
+              onSave={handleSaveRole}
             />
         ) : (
             <div className="animate-fade-in">
@@ -1057,7 +1489,7 @@ export default function App() {
                     >
                         總覽
                     </button>
-                    {ROLES.map(role => (
+                    {roles.map(role => (
                         <button
                             key={role.id}
                             onClick={() => setSelectedRole(role.id)}
@@ -1086,6 +1518,7 @@ export default function App() {
                                 key={task.id} 
                                 task={task} 
                                 users={users}
+                                roles={roles}
                                 onUpdateStatus={handleUpdateStatus}
                                 onUpdateResponse={handleUpdateResponse}
                                 onAddEvidence={handleAddEvidence}

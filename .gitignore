@@ -46,3 +46,17 @@ build/
 # OS files
 Thumbs.db
 .DS_Store
+
+# Supabase
+supabase/.branches
+supabase/.temp
+supabase/.env.local
+supabase/.env.*.local
+
+# Local development
+*.local
+.env.local
+.env.*.local
+
+# API Keys and secrets (already in files, but keep for safety)
+# Note: Actual keys in Code.gs and api.ts should be replaced with placeholders
