@@ -51,6 +51,18 @@ export interface User {
   level: number; // 層級：1-5，第1層為最高
 }
 
+export interface Role {
+  id: string;
+  name: string;
+  icon_name?: string;
+  color?: string;
+  level?: number;
+  webhook?: string;
+  is_default?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
@@ -665,7 +677,151 @@ export async function getUsers(): Promise<ApiResponse<User[]>> {
 }
 
 /**
- * 取得不重複的角色列表
+ * 從 Supabase roles 表取得完整的角色資料（包括 webhook）
+ */
+export async function getRolesFromSupabase(): Promise<ApiResponse<Role[]>> {
+  try {
+    console.log('🔄 開始從 Supabase roles 表取得角色資料...');
+    
+    const url = `${API_BASE_URL}/roles?order=name.asc`;
+    console.log('📤 請求 URL：', url);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: createHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Supabase API 錯誤：', response.status, errorText);
+      // 如果 roles 表不存在，返回空陣列而不是錯誤
+      if (response.status === 404 || response.status === 400) {
+        console.warn('⚠️ roles 表可能尚未創建，返回空陣列');
+        return {
+          success: true,
+          data: []
+        };
+      }
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    const result = await response.json();
+    const roles = Array.isArray(result) ? result : [];
+    
+    console.log('✅ 從 Supabase roles 表取得的角色資料：', roles);
+    console.log('📊 角色數量：', roles.length);
+    
+    return {
+      success: true,
+      data: roles
+    };
+  } catch (error) {
+    console.error('❌ 取得角色資料時發生錯誤：', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '未知錯誤',
+      data: []
+    };
+  }
+}
+
+/**
+ * 儲存角色到 Supabase roles 表
+ */
+export async function saveRoleToSupabase(role: Role): Promise<ApiResponse<Role>> {
+  try {
+    console.log('💾 準備儲存角色到 Supabase：', role);
+
+    const roleData = {
+      id: role.id,
+      name: role.name,
+      icon_name: role.icon_name || 'Briefcase',
+      color: role.color || 'bg-blue-100 text-blue-700',
+      level: role.level || 4,
+      webhook: role.webhook || null,
+      is_default: role.is_default || false
+    };
+
+    const response = await fetch(`${API_BASE_URL}/roles`, {
+      method: 'POST',
+      headers: createHeaders(),
+      body: JSON.stringify(roleData),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    const result = await response.json();
+    const savedRole = Array.isArray(result) ? result[0] : result;
+
+    console.log('✅ 角色已成功儲存到 Supabase');
+    return {
+      success: true,
+      data: savedRole
+    };
+  } catch (error) {
+    console.error('❌ 儲存角色時發生錯誤：', error);
+    const errorMessage = error instanceof Error ? error.message : '未知錯誤';
+    return {
+      success: false,
+      error: errorMessage,
+    };
+  }
+}
+
+/**
+ * 更新 Supabase roles 表中的角色
+ */
+export async function updateRoleInSupabase(role: Role): Promise<ApiResponse<Role>> {
+  try {
+    console.log('🔄 準備更新角色到 Supabase：', role);
+
+    const roleData: any = {
+      name: role.name,
+      icon_name: role.icon_name || 'Briefcase',
+      color: role.color || 'bg-blue-100 text-blue-700',
+      level: role.level || 4,
+      is_default: role.is_default || false
+    };
+
+    // 只有當 webhook 有值時才更新（允許設為 null）
+    if (role.webhook !== undefined) {
+      roleData.webhook = role.webhook || null;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/roles?id=eq.${role.id}`, {
+      method: 'PATCH',
+      headers: createHeaders(),
+      body: JSON.stringify(roleData),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    const result = await response.json();
+    const updatedRole = Array.isArray(result) ? result[0] : result;
+
+    console.log('✅ 角色已成功更新到 Supabase');
+    return {
+      success: true,
+      data: updatedRole
+    };
+  } catch (error) {
+    console.error('❌ 更新角色時發生錯誤：', error);
+    const errorMessage = error instanceof Error ? error.message : '未知錯誤';
+    return {
+      success: false,
+      error: errorMessage,
+    };
+  }
+}
+
+/**
+ * 取得不重複的角色列表（從 users 表，向後相容）
  * 資料來源：Supabase 的 users 表中的 role 欄位
  * 功能：自動移除重複的角色，過濾掉空值
  */

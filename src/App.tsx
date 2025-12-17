@@ -36,13 +36,17 @@ import {
   getTasks, 
   getUsers,
   getRoles,
+  getRolesFromSupabase,
+  saveRoleToSupabase,
+  updateRoleInSupabase,
   createUser,
   updateUser,
   deleteUser,
   analyzeTaskWithAIGet,
   type Task,
   type User,
-  type Evidence
+  type Evidence,
+  type Role as ApiRole
 } from '../api';
 
 // --- Constants ---
@@ -98,6 +102,7 @@ type Role = {
   color: string;
   isDefault?: boolean;
   level?: number; // 層級：1-5，第1層為最高
+  webhook?: string; // Webhook URL（可選）
 };
 
 // 從 localStorage 載入自訂角色
@@ -143,6 +148,7 @@ const saveCustomRoles = (roles: Role[]) => {
           name: role.name,
           iconName: iconName,
           color: role.color,
+          webhook: role.webhook, // 包含 webhook
           level: role.level || 5
         };
       });
@@ -1150,7 +1156,8 @@ const CreateRoleForm = ({
     icon: editingRole?.icon || Briefcase,
     color: editingRole?.color || 'bg-blue-100 text-blue-700',
     iconName: editingRole ? getIconName(editingRole.icon) : 'Briefcase',
-    level: editingRole?.level === 5 ? 4 : (editingRole?.level || 4) // 預設為員工（層級 4）
+    level: editingRole?.level === 5 ? 4 : (editingRole?.level || 4), // 預設為員工（層級 4）
+    webhook: editingRole?.webhook || '' // Webhook URL
   });
 
   const handleSubmit = () => {
@@ -1177,7 +1184,8 @@ const CreateRoleForm = ({
       icon: selectedIcon,
       color: formData.color,
       isDefault: false,
-      level: finalLevel
+      level: finalLevel,
+      webhook: formData.webhook.trim() || undefined // 如果為空則設為 undefined
     });
   };
 
@@ -1263,6 +1271,23 @@ const CreateRoleForm = ({
         </div>
         <p className="text-xs text-slate-400 mt-2">
           注意：層級 5 已統一改為「員工」（層級 4），請選擇「員工」即可
+        </p>
+      </div>
+
+      {/* Webhook URL */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-slate-700 mb-2">
+          Webhook URL <span className="text-xs text-slate-400">(選填，用於接收通知)</span>
+        </label>
+        <input 
+          type="url" 
+          className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          value={formData.webhook}
+          onChange={(e) => setFormData({...formData, webhook: e.target.value})}
+          placeholder="https://hooks.example.com/webhook/..."
+        />
+        <p className="text-xs text-slate-400 mt-1">
+          輸入 Webhook URL，當有任務指派給此角色時會發送通知
         </p>
       </div>
 
@@ -1386,6 +1411,14 @@ const RoleManagementView = ({
                   <div className="flex-1">
                     <h3 className="font-bold text-slate-800">{role.name}</h3>
                     <p className="text-xs text-slate-500">ID: {role.id}</p>
+                    {role.webhook && (
+                      <div className="mt-1 flex items-center text-xs text-green-600">
+                        <ExternalLink size={12} className="mr-1" />
+                        <span className="truncate max-w-[200px]" title={role.webhook}>
+                          Webhook 已設定
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1500,23 +1533,186 @@ export default function App() {
     }
   };
 
-  // 載入角色列表（使用 SQL 查詢，效能較佳）
+  // 同步 localStorage 中的角色資料到 Supabase
+  const syncRolesToSupabase = async () => {
+    try {
+      const localRoles = loadCustomRoles();
+      if (localRoles.length === 0) {
+        console.log('📋 localStorage 中沒有角色資料，跳過同步');
+        return;
+      }
+
+      console.log('🔄 開始同步 localStorage 中的角色到 Supabase...');
+      console.log('📋 需要同步的角色數量：', localRoles.length);
+
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const role of localRoles) {
+        try {
+          const apiRole: ApiRole = {
+            id: role.id,
+            name: role.name,
+            icon_name: AVAILABLE_ICONS.find(i => i.icon === role.icon)?.name || 'Briefcase',
+            color: role.color,
+            level: role.level === 5 ? 4 : (role.level || 4),
+            webhook: role.webhook || null,
+            is_default: role.isDefault || false
+          };
+
+          // 嘗試更新（如果存在）或創建（如果不存在）
+          const updateResult = await updateRoleInSupabase(apiRole);
+          if (!updateResult.success) {
+            // 如果更新失敗，嘗試創建
+            const createResult = await saveRoleToSupabase(apiRole);
+            if (createResult.success) {
+              successCount++;
+              console.log(`✅ 角色 ${role.name} 已同步到 Supabase（創建）`);
+            } else {
+              failCount++;
+              console.warn(`⚠️ 角色 ${role.name} 同步失敗：`, createResult.error);
+            }
+          } else {
+            successCount++;
+            console.log(`✅ 角色 ${role.name} 已同步到 Supabase（更新）`);
+          }
+        } catch (error) {
+          failCount++;
+          console.error(`❌ 同步角色 ${role.name} 時發生錯誤：`, error);
+        }
+      }
+
+      console.log(`✅ 同步完成：成功 ${successCount} 個，失敗 ${failCount} 個`);
+    } catch (error) {
+      console.error('❌ 同步角色到 Supabase 時發生錯誤：', error);
+    }
+  };
+
+  // 載入角色列表（優先從 Supabase roles 表讀取，包括 webhook）
   const loadRoles = async () => {
     try {
-      const result = await getRoles();
-      if (result.success && result.data) {
-        console.log('📋 從資料庫獲取的不重複角色：', result.data);
-        setRoleIds(result.data);
-        setRoles(getAllRoles(result.data));
+      // 優先從 Supabase roles 表讀取完整角色資料（包括 webhook）
+      const supabaseRolesResult = await getRolesFromSupabase();
+      
+      if (supabaseRolesResult.success && supabaseRolesResult.data && supabaseRolesResult.data.length > 0) {
+        console.log('✅ 從 Supabase roles 表取得角色資料：', supabaseRolesResult.data);
+        
+        // 將 Supabase 的角色資料轉換為前端 Role 格式
+        const convertedRoles: Role[] = supabaseRolesResult.data.map((apiRole: ApiRole) => {
+          // 找到對應的圖示
+          const iconOption = AVAILABLE_ICONS.find(i => i.name === (apiRole.icon_name || 'Briefcase'));
+          
+          return {
+            id: apiRole.id,
+            name: apiRole.name,
+            icon: iconOption?.icon || Briefcase,
+            color: apiRole.color || 'bg-blue-100 text-blue-700',
+            level: apiRole.level === 5 ? 4 : (apiRole.level || 4),
+            webhook: apiRole.webhook || undefined,
+            isDefault: apiRole.is_default || false
+          };
+        });
+        
+        // 合併預設角色和從 Supabase 取得的角色
+        const allRoles = getAllRoles([]);
+        const roleMap = new Map<string, Role>();
+        
+        // 先加入預設角色
+        allRoles.filter(r => r.isDefault).forEach(role => roleMap.set(role.id, role));
+        
+        // 再加入從 Supabase 取得的角色（會覆蓋預設角色中相同 ID 的）
+        convertedRoles.forEach(role => roleMap.set(role.id, role));
+        
+        setRoles(Array.from(roleMap.values()));
+        
+        // 提取角色 ID 列表（用於向後相容）
+        const roleIds = Array.from(roleMap.values()).map(r => r.id);
+        setRoleIds(roleIds);
+        
+        console.log('✅ 成功載入角色，總數：', roleMap.size);
+        
+        // 如果 Supabase 有資料，嘗試同步 localStorage 的資料（確保 webhook 等資料同步）
+        const localRoles = loadCustomRoles();
+        if (localRoles.length > 0) {
+          console.log('🔄 檢測到 localStorage 中有角色資料，開始同步...');
+          // 在背景同步，不阻塞 UI
+          syncRolesToSupabase().catch(err => {
+            console.error('❌ 背景同步失敗：', err);
+          });
+        }
       } else {
-        console.warn('⚠️ 載入角色失敗，使用預設角色');
-        setRoleIds([]);
-        setRoles(getAllRoles([]));
+        // 如果 Supabase roles 表沒有資料，從 localStorage 讀取並同步到 Supabase
+        console.log('⚠️ Supabase roles 表沒有資料，從 localStorage 讀取並同步');
+        const localRoles = loadCustomRoles();
+        
+        if (localRoles.length > 0) {
+          console.log('📋 從 localStorage 讀取角色資料，數量：', localRoles.length);
+          // 先顯示 localStorage 的資料
+          setRoles(getAllRoles([]));
+          
+          // 同步到 Supabase
+          await syncRolesToSupabase();
+          
+          // 重新載入（現在應該從 Supabase 讀取）
+          const retryResult = await getRolesFromSupabase();
+          if (retryResult.success && retryResult.data && retryResult.data.length > 0) {
+            const convertedRoles: Role[] = retryResult.data.map((apiRole: ApiRole) => {
+              const iconOption = AVAILABLE_ICONS.find(i => i.name === (apiRole.icon_name || 'Briefcase'));
+              return {
+                id: apiRole.id,
+                name: apiRole.name,
+                icon: iconOption?.icon || Briefcase,
+                color: apiRole.color || 'bg-blue-100 text-blue-700',
+                level: apiRole.level === 5 ? 4 : (apiRole.level || 4),
+                webhook: apiRole.webhook || undefined,
+                isDefault: apiRole.is_default || false
+              };
+            });
+            setRoles(convertedRoles);
+            setRoleIds(convertedRoles.map(r => r.id));
+          } else {
+            // 如果同步後還是沒有資料，使用 localStorage
+            setRoles(getAllRoles([]));
+            setRoleIds([]);
+          }
+        } else {
+          // 如果 localStorage 也沒有，從 users 表讀取（向後相容）
+          console.log('📋 localStorage 也沒有角色資料，從 users 表讀取角色列表');
+          const result = await getRoles();
+          if (result.success && result.data) {
+            console.log('📋 從 users 表獲取的不重複角色：', result.data);
+            setRoleIds(result.data);
+            setRoles(getAllRoles(result.data));
+          } else {
+            console.warn('⚠️ 載入角色失敗，使用預設角色');
+            setRoleIds([]);
+            setRoles(getAllRoles([]));
+          }
+        }
       }
     } catch (error) {
       console.error('❌ 載入角色時發生錯誤：', error);
-      setRoleIds([]);
-      setRoles(getAllRoles([]));
+      // 發生錯誤時，嘗試從 localStorage 或 users 表讀取（向後相容）
+      try {
+        const localRoles = loadCustomRoles();
+        if (localRoles.length > 0) {
+          setRoles(getAllRoles([]));
+          setRoleIds([]);
+        } else {
+          const result = await getRoles();
+          if (result.success && result.data) {
+            setRoleIds(result.data);
+            setRoles(getAllRoles(result.data));
+          } else {
+            setRoleIds([]);
+            setRoles(getAllRoles([]));
+          }
+        }
+      } catch (fallbackError) {
+        console.error('❌ 備用載入方式也失敗：', fallbackError);
+        setRoleIds([]);
+        setRoles(getAllRoles([]));
+      }
     }
   };
 
@@ -1734,22 +1930,65 @@ export default function App() {
     }
   };
 
-  const handleSaveRole = (role: Role) => {
+  const handleSaveRole = async (role: Role) => {
     const isEditing = roles.some(r => r.id === role.id && !r.isDefault);
-    let updatedRoles: Role[];
+    
+    try {
+      // 準備要保存到 Supabase 的角色資料
+      const apiRole: ApiRole = {
+        id: role.id,
+        name: role.name,
+        icon_name: AVAILABLE_ICONS.find(i => i.icon === role.icon)?.name || 'Briefcase',
+        color: role.color,
+        level: role.level === 5 ? 4 : (role.level || 4),
+        webhook: role.webhook || null,
+        is_default: role.isDefault || false
+      };
 
-    if (isEditing) {
-      // 編輯現有角色
-      updatedRoles = roles.map(r => r.id === role.id && !r.isDefault ? role : r);
-    } else {
-      // 新增角色
-      updatedRoles = [...roles, role];
+      // 保存到 Supabase roles 表
+      let supabaseResult;
+      if (isEditing) {
+        supabaseResult = await updateRoleInSupabase(apiRole);
+      } else {
+        supabaseResult = await saveRoleToSupabase(apiRole);
+      }
+
+      if (supabaseResult.success) {
+        console.log('✅ 角色已成功保存到 Supabase');
+      } else {
+        console.warn('⚠️ 保存到 Supabase 失敗，但繼續保存到 localStorage：', supabaseResult.error);
+      }
+
+      // 同時保存到 localStorage（作為備份）
+      let updatedRoles: Role[];
+      if (isEditing) {
+        updatedRoles = roles.map(r => r.id === role.id && !r.isDefault ? role : r);
+      } else {
+        updatedRoles = [...roles, role];
+      }
+
+      setRoles(updatedRoles);
+      saveCustomRoles(updatedRoles);
+      
+      // 重新載入角色列表以確保資料同步
+      await loadRoles();
+      
+      setView('roles');
+      alert(isEditing ? '角色已更新！' : '角色已新增！');
+    } catch (error) {
+      console.error('❌ 保存角色時發生錯誤：', error);
+      // 即使 Supabase 失敗，也保存到 localStorage
+      let updatedRoles: Role[];
+      if (isEditing) {
+        updatedRoles = roles.map(r => r.id === role.id && !r.isDefault ? role : r);
+      } else {
+        updatedRoles = [...roles, role];
+      }
+      setRoles(updatedRoles);
+      saveCustomRoles(updatedRoles);
+      setView('roles');
+      alert('角色已保存到本地，但 Supabase 同步可能失敗，請檢查網路連接');
     }
-
-    setRoles(updatedRoles);
-    saveCustomRoles(updatedRoles);
-    setView('roles');
-    alert(isEditing ? '角色已更新！' : '角色已新增！');
   };
 
   const handleDeleteRole = (roleId: string) => {

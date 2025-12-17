@@ -17,7 +17,7 @@ git status --short
 echo.
 
 echo [3/4] 提交變更...
-git commit -m "更新：添加員工管理新增/刪除功能，優化角色過濾器顯示，包含 Supabase 遷移文件和種子資料"
+git commit -m "更新：添加 roles 表與 users 表一對多關聯，支援 Webhook 設定，同步角色資料到 Supabase，包含所有 Supabase 遷移文件"
 if errorlevel 1 (
     echo ⚠️  提交失敗或沒有變更需要提交
 ) else (
@@ -47,11 +47,12 @@ echo 完成！
 echo ========================================
 echo.
 echo 已推送的文件包括：
-echo   ✅ api.ts
-echo   ✅ src/App.tsx
+echo   ✅ api.ts - 新增 roles 表 API 函數（getRolesFromSupabase, saveRoleToSupabase, updateRoleInSupabase）
+echo   ✅ src/App.tsx - 角色管理功能更新，支援 Webhook，同步到 Supabase
+echo   ✅ supabase/migrations/20251215000000_create_roles_table.sql - roles 表遷移文件
+echo   ✅ supabase/migrations/20251214000000_fix_users_table_structure.sql - users 表結構修復
 echo   ✅ supabase/seed.sql
-echo   ✅ supabase/migrations/*.sql
 echo   ✅ supabase/config.toml
-echo   ✅ 所有新增的 .bat 和 .md 文件
+echo   ✅ 所有相關的說明文件
 echo.
 pause
