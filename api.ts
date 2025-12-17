@@ -523,6 +523,42 @@ export async function updateUser(user: User): Promise<ApiResponse<User>> {
 }
 
 /**
+ * 刪除員工資料
+ */
+export async function deleteUser(userId: number): Promise<ApiResponse<void>> {
+  try {
+    console.log('🗑️ 準備刪除員工 ID：', userId);
+
+    const response = await fetch(`${API_BASE_URL}/users?id=eq.${userId}`, {
+      method: 'DELETE',
+      headers: createHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ 刪除員工失敗：', response.status, errorText);
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    // DELETE 請求成功時通常返回空內容或 204 狀態碼
+    const responseText = await response.text();
+    console.log('✅ 員工已成功刪除，回應：', responseText || '無內容（成功）');
+
+    return {
+      success: true
+    };
+  } catch (error) {
+    console.error('❌ 刪除員工時發生錯誤：', error);
+    const errorMessage = error instanceof Error ? error.message : '未知錯誤';
+    
+    return {
+      success: false,
+      error: errorMessage,
+    };
+  }
+}
+
+/**
  * 使用 Gemini AI 分析任務描述
  * 注意：這個功能需要透過 Google Apps Script，因為需要 Gemini API Key
  * 如果 Google Apps Script 已設定，可以透過它來調用
@@ -583,21 +619,43 @@ export async function getUsers(): Promise<ApiResponse<User[]>> {
     const result = await response.json();
     const users = Array.isArray(result) ? result : [];
     
+    console.log('📥 從 Supabase 取得的原始用戶資料：', users);
+    console.log('📊 用戶數量：', users.length);
+    
+    const processedUsers = users.map((user: any) => {
+      // 處理 level 欄位：確保是數字類型，null/undefined 設為 4，5 改為 4
+      let userLevel: number;
+      if (user.level === null || user.level === undefined) {
+        userLevel = 4; // 預設為員工層級
+      } else {
+        const levelNum = typeof user.level === 'string' ? parseInt(user.level, 10) : Number(user.level);
+        userLevel = levelNum === 5 ? 4 : (isNaN(levelNum) ? 4 : levelNum);
+      }
+      
+      const processedUser = {
+        id: user.id,
+        name: user.name || '',
+        role: user.role || '',
+        level: userLevel
+      };
+      
+      console.log(`👤 處理用戶 ${user.id} (${user.name}): level=${user.level} -> ${userLevel}`);
+      
+      return processedUser;
+    });
+    
+    console.log('✅ 處理後的用戶資料：', processedUsers);
+    console.log('📊 層級統計：', processedUsers.reduce((acc: any, user: User) => {
+      acc[user.level] = (acc[user.level] || 0) + 1;
+      return acc;
+    }, {}));
+    
     return {
       success: true,
-      data: users.map((user: any) => {
-        // 確保層級不會是 5（統一改為 4）
-        const userLevel = user.level === 5 ? 4 : (user.level || 4);
-        return {
-          id: user.id,
-          name: user.name || '',
-          role: user.role || '',
-          level: userLevel
-        };
-      })
+      data: processedUsers
     };
   } catch (error) {
-    console.error('取得人員列表時發生錯誤：', error);
+    console.error('❌ 取得人員列表時發生錯誤：', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : '未知錯誤',
@@ -607,41 +665,63 @@ export async function getUsers(): Promise<ApiResponse<User[]>> {
 }
 
 /**
- * 取得不重複的角色列表（使用 SQL 查詢，效能較佳）
- * 只獲取 role 欄位，減少資料傳輸量
+ * 取得不重複的角色列表
+ * 資料來源：Supabase 的 users 表中的 role 欄位
+ * 功能：自動移除重複的角色，過濾掉空值
  */
 export async function getRoles(): Promise<ApiResponse<string[]>> {
   try {
+    console.log('🔄 開始從 Supabase 取得角色列表...');
+    console.log('📋 查詢來源：users 表的 role 欄位');
+    
     // 使用 PostgREST 的 select 參數，只獲取 role 欄位
     // 這樣可以大幅減少資料傳輸量
-    const response = await fetch(`${API_BASE_URL}/users?select=role`, {
+    const url = `${API_BASE_URL}/users?select=role`;
+    console.log('📤 請求 URL：', url);
+    
+    const response = await fetch(url, {
       method: 'GET',
       headers: createHeaders(),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('❌ Supabase API 錯誤：', response.status, errorText);
       throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
 
     const result = await response.json();
     const roles = Array.isArray(result) ? result : [];
     
-    // 提取不重複的 role 值，過濾掉空值
-    const uniqueRoles = Array.from(
-      new Set(
-        roles
-          .map((item: any) => item.role)
-          .filter((role: string | null | undefined) => role != null && role !== '')
-      )
-    ) as string[];
+    console.log('📥 從 Supabase 取得的原始角色資料：', roles);
+    console.log('📊 原始資料筆數：', roles.length);
+    
+    // 提取 role 值，過濾掉空值、null、undefined
+    const roleValues = roles
+      .map((item: any) => item.role)
+      .filter((role: string | null | undefined) => {
+        // 過濾掉 null、undefined、空字串、空白字串
+        return role != null && role !== '' && role.trim() !== '';
+      });
+    
+    console.log('📋 過濾後的 role 值：', roleValues);
+    console.log('📊 過濾後筆數：', roleValues.length);
+    
+    // 使用 Set 移除重複的角色
+    const uniqueRoles = Array.from(new Set(roleValues)) as string[];
+    
+    // 按字母順序排序（可選，讓列表更整齊）
+    uniqueRoles.sort((a, b) => a.localeCompare(b, 'zh-TW'));
+    
+    console.log('✅ 去重後的不重複角色：', uniqueRoles);
+    console.log('📊 最終角色數量：', uniqueRoles.length);
     
     return {
       success: true,
       data: uniqueRoles
     };
   } catch (error) {
-    console.error('取得角色列表時發生錯誤：', error);
+    console.error('❌ 取得角色列表時發生錯誤：', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : '未知錯誤',

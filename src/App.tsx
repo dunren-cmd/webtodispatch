@@ -38,6 +38,7 @@ import {
   getRoles,
   createUser,
   updateUser,
+  deleteUser,
   analyzeTaskWithAIGet,
   type Task,
   type User,
@@ -922,7 +923,7 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
 
 // --- Employee Management Component ---
 
-const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCancel, onCreate, onUpdate }: {
+const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCancel, onCreate, onUpdate, onDelete }: {
   roles: Role[];
   defaultRole?: string;
   defaultLevel?: number;
@@ -930,6 +931,7 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
   onCancel: () => void;
   onCreate: (user: Omit<User, 'id'>) => void;
   onUpdate?: (user: User) => void;
+  onDelete?: (userId: number) => void;
 }) => {
   const isEditing = !!editingUser;
   const [formData, setFormData] = useState({
@@ -1100,6 +1102,18 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
           <button onClick={onCancel} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-lg font-medium hover:bg-slate-200">
             取消
           </button>
+          {isEditing && editingUser && onDelete && (
+            <button 
+              onClick={() => {
+                if (confirm(`確定要刪除員工「${editingUser.name}」嗎？\n\n此操作無法復原！`)) {
+                  onDelete(editingUser.id);
+                }
+              }} 
+              className="px-4 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 flex items-center justify-center"
+            >
+              <Trash2 size={18} className="mr-2" /> 刪除
+            </button>
+          )}
           <button onClick={handleSubmit} className="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
             {isEditing ? '儲存變更' : '確認新增'}
           </button>
@@ -1441,19 +1455,35 @@ export default function App() {
   // 載入人員列表
   const loadUsers = async () => {
     try {
+      console.log('🔄 開始載入員工資料...');
       const result = await getUsers();
       console.log('📥 getUsers API 回應：', result);
-      if (result.success && result.data && result.data.length > 0) {
-        console.log('📋 載入的員工資料詳情：', result.data);
-        console.log('📊 角色統計：', result.data.reduce((acc: any, user: User) => {
-          acc[user.role] = (acc[user.role] || 0) + 1;
-          return acc;
-        }, {}));
-        setUsers(result.data);
-        console.log('✅ 成功載入員工資料：', result.data.length, '人');
+      console.log('📊 result.success:', result.success);
+      console.log('📊 result.data:', result.data);
+      console.log('📊 result.data?.length:', result.data?.length);
+      
+      if (result.success && result.data) {
+        if (result.data.length > 0) {
+          console.log('📋 載入的員工資料詳情：', result.data);
+          console.log('📊 角色統計：', result.data.reduce((acc: any, user: User) => {
+            acc[user.role] = (acc[user.role] || 0) + 1;
+            return acc;
+          }, {}));
+          console.log('📊 層級統計：', result.data.reduce((acc: any, user: User) => {
+            acc[`level_${user.level}`] = (acc[`level_${user.level}`] || 0) + 1;
+            return acc;
+          }, {}));
+          setUsers(result.data);
+          console.log('✅ 成功載入員工資料：', result.data.length, '人');
+        } else {
+          console.warn('⚠️ API 返回成功但沒有資料（空陣列）');
+          console.warn('💡 這表示資料庫中 users 表是空的，請先新增員工資料');
+          setUsers([]); // 設為空陣列，讓用戶知道沒有資料
+        }
       } else {
-        // 如果 API 失敗或沒有資料，使用預設人員
-        console.warn('⚠️ API 載入失敗或沒有資料，使用預設人員');
+        // 如果 API 失敗，使用預設人員（僅用於開發測試）
+        console.warn('⚠️ API 載入失敗，錯誤：', result.error);
+        console.warn('💡 使用預設人員（僅用於開發測試）');
         setUsers([
           { id: 1, name: '陳主任', role: 'medical_admin', level: 1 },
           { id: 2, name: '林護理長', role: 'nurse', level: 2 },
@@ -1465,15 +1495,8 @@ export default function App() {
       }
     } catch (error) {
       console.error('❌ 載入員工資料時發生錯誤：', error);
-      // 發生錯誤時也使用預設人員
-      setUsers([
-        { id: 1, name: '陳主任', role: 'medical_admin', avatar: '👨‍⚕️' },
-        { id: 2, name: '林護理長', role: 'nurse', avatar: '👩‍⚕️' },
-        { id: 3, name: '張社工', role: 'social_worker', avatar: '🧑‍💼' },
-        { id: 4, name: '王治療師', role: 'ot', avatar: '🧘' },
-        { id: 5, name: '李專員', role: 'ward_ops', avatar: '👨‍💼' },
-        { id: 6, name: '吳協調員', role: 'medical_admin', avatar: '👩‍💼' },
-      ]);
+      // 發生錯誤時設為空陣列，讓用戶知道有問題
+      setUsers([]);
     }
   };
 
@@ -1635,6 +1658,44 @@ export default function App() {
         setView('users');
       }
       alert('員工資料可能已更新，請檢查員工列表確認');
+    }
+  };
+
+  const handleDeleteUser = async (userId: number) => {
+    try {
+      console.log('🗑️ 開始刪除員工 ID：', userId);
+      const result = await deleteUser(userId);
+      if (result.success) {
+        // 等待一下讓後端處理完成
+        await new Promise(resolve => setTimeout(resolve, 500));
+        // 重新載入員工列表以確認資料已刪除
+        await loadUsers();
+        setEditingUser(undefined);
+        // 根據選擇的層級和角色返回對應的頁面
+        if (selectedRoleForUsers && selectedLevelForUsers) {
+          setView('users-by-role');
+        } else if (selectedLevelForUsers) {
+          setView('users-by-level');
+        } else {
+          setView('users');
+        }
+        alert('員工資料已成功刪除！');
+      } else {
+        alert('刪除員工資料失敗：' + (result.error || '未知錯誤'));
+      }
+    } catch (error) {
+      console.error('刪除員工時發生錯誤：', error);
+      // 即使發生錯誤，也嘗試重新載入（可能已經成功）
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await loadUsers();
+      setEditingUser(undefined);
+      // 如果有選中的角色，回到該角色的員工列表；否則回到角色列表
+      if (selectedRoleForUsers) {
+        setView('users-by-role');
+      } else {
+        setView('users');
+      }
+      alert('員工資料可能已刪除，請檢查員工列表確認');
     }
   };
 
@@ -2049,6 +2110,7 @@ export default function App() {
                   }}
                   onCreate={handleCreateUser}
                   onUpdate={handleUpdateUser}
+                  onDelete={handleDeleteUser}
                 />
               );
             })()
@@ -2095,28 +2157,48 @@ export default function App() {
                 </div>
 
                 {/* Role Filter Tabs */}
-                <div className="flex overflow-x-auto space-x-2 mb-6 pb-2 no-scrollbar">
-                    <button 
-                        onClick={() => setSelectedRole('all')}
-                        className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all ${selectedRole === 'all' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 shadow-sm'}`}
-                    >
-                        總覽
-                    </button>
-                    {roles.filter(r => r.id.toLowerCase() !== 'ot').map(role => (
-                        <button
-                            key={role.id}
-                            onClick={() => setSelectedRole(role.id)}
-                            className={`flex-shrink-0 flex items-center px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                                selectedRole === role.id 
-                                ? role.color.replace('bg-', 'bg-').replace('text-', 'text-white bg-opacity-100 bg-') 
-                                : 'bg-white text-slate-600 shadow-sm'
-                            } ${selectedRole === role.id ? 'ring-2 ring-offset-1 ring-slate-300' : ''}`}
+                {(() => {
+                  // 過濾出有任務的角色
+                  const rolesWithTasks = roles.filter(r => {
+                    if (r.id.toLowerCase() === 'ot') return false;
+                    // 檢查是否有該角色的任務
+                    return tasks.some(t => t.roleCategory === r.id);
+                  });
+
+                  return (
+                    <div className="mb-6">
+                      {/* 總覽按鈕 */}
+                      <div className="mb-2">
+                        <button 
+                          onClick={() => setSelectedRole('all')}
+                          className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${selectedRole === 'all' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 shadow-sm'}`}
                         >
-                            <role.icon size={14} className="mr-2"/>
-                            {role.name}
+                          總覽
                         </button>
-                    ))}
-                </div>
+                      </div>
+                      
+                      {/* 角色按鈕 - 使用兩行網格布局 */}
+                      {rolesWithTasks.length > 0 && (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+                          {rolesWithTasks.map(role => (
+                            <button
+                              key={role.id}
+                              onClick={() => setSelectedRole(role.id)}
+                              className={`flex items-center justify-center px-3 py-2 rounded-full text-sm font-medium transition-all ${
+                                selectedRole === role.id 
+                                  ? role.color.replace('bg-', 'bg-').replace('text-', 'text-white bg-opacity-100 bg-') 
+                                  : 'bg-white text-slate-600 shadow-sm hover:bg-slate-50'
+                              } ${selectedRole === role.id ? 'ring-2 ring-offset-1 ring-slate-300' : ''}`}
+                            >
+                              <role.icon size={14} className="mr-2 flex-shrink-0"/>
+                              <span className="truncate">{role.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Task List */}
                 <div className="space-y-4">

@@ -1,0 +1,3 @@
+-- Seed file for database initialization
+-- This file is executed after migrations during db reset
+-- Add your seed data here if needed
