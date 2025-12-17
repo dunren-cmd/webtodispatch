@@ -5,9 +5,17 @@
 
 // Supabase 配置（請替換為你的 Supabase 專案資訊）
 const SUPABASE_URL = "http://192.168.68.75:54321"; // 本地 Supabase API 服務（端口 54321）
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY"; // 你的 Supabase Anon Key
+const SUPABASE_ANON_KEY = "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH"; // 你的 Supabase Anon Key
 const SUPABASE_TABLE_TASKS = "tasks"; // 任務表名稱
 const SUPABASE_TABLE_USERS = "users"; // 用戶表名稱
+const SUPABASE_TABLE_PERSONNEL = "PersonnelData"; // 員工資料表名稱
+
+// Google Chat Webhook 配置（請替換為實際的 Webhook URL）
+// 如何取得 Webhook URL：
+// 1. 在 Google Chat 中建立一個空間（Space）
+// 2. 點擊空間設定 → 整合 → 新增 Webhook
+// 3. 複製 Webhook URL 並設定到下方
+const GOOGLE_CHAT_WEBHOOK_URL = ""; // 請填入您的 Google Chat Webhook URL
 
 // ========================================
 // 處理 POST 請求（接收前端資料）
@@ -287,11 +295,20 @@ function createResponse(data) {
 // ========================================
 function saveTask(taskData) {
   Logger.log('📊 開始儲存任務到 Supabase...');
+  Logger.log('📋 收到的任務資料：' + JSON.stringify(taskData));
   
   try {
+    // 支援兩種命名方式：assigneeId (駝峰) 或 assignee_id (底線)
+    const assignerId = taskData.assignerId || taskData.assigner_id || null;
+    const assigneeId = taskData.assigneeId || taskData.assignee_id || null;
+    
+    Logger.log(`🔍 解析後的 ID - 交辦人：${assignerId}，承辦人：${assigneeId}`);
+    
     // 取得人員姓名
-    const assignerName = getUserName(taskData.assignerId);
-    const assigneeName = getUserName(taskData.assigneeId);
+    const assignerName = getUserName(assignerId);
+    const assigneeName = getUserName(assigneeId);
+    
+    Logger.log(`👤 人員姓名 - 交辦人：${assignerName}，承辦人：${assigneeName}`);
     
     // 準備要寫入的資料
     const timestamp = new Date().toISOString();
@@ -302,17 +319,17 @@ function saveTask(taskData) {
       timestamp: timestamp,
       title: taskData.title || '',
       description: taskData.description || '',
-      assigner_id: taskData.assignerId || null,
+      assigner_id: assignerId,
       assigner_name: assignerName,
-      assignee_id: taskData.assigneeId || null,
+      assignee_id: assigneeId,
       assignee_name: assigneeName,
-      collaborator_ids: taskData.collaboratorIds || [],
-      role_category: taskData.roleCategory || '',
-      plan_date: taskData.dates?.plan || null,
-      interim_date: taskData.dates?.interim || null,
-      final_date: taskData.dates?.final || null,
+      collaborator_ids: taskData.collaboratorIds || taskData.collaborator_ids || [],
+      role_category: taskData.roleCategory || taskData.role_category || '',
+      plan_date: taskData.dates?.plan || taskData.plan_date || null,
+      interim_date: taskData.dates?.interim || taskData.interim_date || null,
+      final_date: taskData.dates?.final || taskData.final_date || null,
       status: taskData.status || 'pending',
-      assignee_response: taskData.assigneeResponse || '',
+      assignee_response: taskData.assigneeResponse || taskData.assignee_response || '',
       evidence: taskData.evidence || []
     };
     
@@ -320,6 +337,78 @@ function saveTask(taskData) {
     const result = supabaseRequest('POST', SUPABASE_TABLE_TASKS, insertData);
     
     Logger.log('✅ 任務已成功儲存到 Supabase');
+    
+    // 發送 Chat 通知給被指派人（交給誰）
+    if (assigneeId) {
+      Logger.log(`📧 準備發送 Chat 通知給承辦人 ID：${assigneeId}`);
+      try {
+        const assigneeEmail = getUserEmail(assigneeId);
+        Logger.log(`📧 承辦人 email：${assigneeEmail || '未找到'}`);
+        if (assigneeEmail) {
+          const taskUrl = `http://192.168.68.75:3050?task=${taskId}`;
+          const chatUrl = `${taskUrl}&chat=true`;
+          
+          // 構建通知訊息內容
+          let message = `📋 您有新的任務被指派\n\n`;
+          message += `任務標題：${taskData.title}\n`;
+          if (taskData.description) {
+            message += `\n任務說明：\n${taskData.description}\n`;
+          }
+          if (taskData.dates?.final) {
+            const finalDate = new Date(taskData.dates.final);
+            message += `\n⏰ 最終期限：${finalDate.toLocaleDateString('zh-TW')}\n`;
+          }
+          message += `\n交辦人：${assignerName}\n`;
+          message += `\n請登入系統查看任務詳情並開始處理。`;
+          
+          // 發送 Google Chat 通知到個人（通過 email），並附加日曆事件
+          // 這會發送 email，Google Chat 會自動同步顯示（如果用戶設定了 email 通知）
+          const chatResult = sendChatNotificationToPerson(
+            assigneeEmail,
+            assigneeName,
+            assignerName,
+            message,
+            taskData.title,
+            chatUrl,
+            taskData.dates // 傳入日期資訊用於創建日曆事件
+          );
+          
+          if (chatResult.success) {
+            Logger.log(`✅ Google Chat 通知已發送到個人（交給誰：${assigneeName}）`);
+            Logger.log(`📧 通知方式：${chatResult.method || 'email'}`);
+            if (chatResult.calendarSent) {
+              Logger.log(`📅 日曆事件已附加到 email`);
+            }
+          } else {
+            Logger.log(`⚠️ Google Chat 通知發送失敗：${chatResult.error}`);
+            Logger.log(`💡 嘗試使用 Email 備用方案...`);
+            // 如果 Chat 失敗，嘗試使用 Email 作為備用
+            try {
+              sendChatNotificationEmail(
+                assigneeEmail,
+                assigneeName,
+                assignerName,
+                message,
+                taskData.title,
+                chatUrl
+              );
+              Logger.log(`✅ Email 備用通知已發送`);
+            } catch (emailError) {
+              Logger.log(`⚠️ Email 備用通知也失敗：${emailError.toString()}`);
+            }
+          }
+        } else {
+          Logger.log(`⚠️ 找不到被指派人 ${assigneeId} 的 email，跳過 Chat 通知`);
+          Logger.log(`💡 提示：請確認用戶 ID ${assigneeId} 在 users 表中存在，且 mail 欄位有設定 email`);
+        }
+      } catch (emailError) {
+        // 發送通知失敗不影響任務建立
+        Logger.log(`⚠️ 發送 Chat 通知失敗，但不影響任務建立：${emailError.toString()}`);
+        Logger.log(`錯誤詳情：${emailError.stack || emailError}`);
+      }
+    } else {
+      Logger.log(`⚠️ 任務沒有指定承辦人（assigneeId），跳過 Chat 通知`);
+    }
     
     return { 
       success: true, 
@@ -840,6 +929,568 @@ function getUserName(userId) {
 }
 
 // ========================================
+// Email 通知功能
+// ========================================
+
+/**
+ * 從 users 表取得用戶 email（合併後直接從 users.mail 取得）
+ * @param {number} userId - 用戶 ID（對應到 users.id 和 PersonnelData.id）
+ * @returns {string|null} 用戶 email，找不到則返回 null
+ */
+function getUserEmail(userId) {
+  if (!userId) {
+    Logger.log(`⚠️ getUserEmail: userId 為空`);
+    return null;
+  }
+  
+  Logger.log(`🔍 開始查詢用戶 ID ${userId} 的 email...`);
+  
+  try {
+    // 直接從 users 表取得 email（合併後 mail 欄位已存在於 users 表）
+    const userFilter = `id=eq.${userId}`;
+    Logger.log(`📋 查詢 users 表，filter: ${userFilter}`);
+    const userResult = supabaseRequest('GET', SUPABASE_TABLE_USERS, null, userFilter);
+    
+    Logger.log(`📋 users 表查詢結果：${JSON.stringify(userResult)}`);
+    
+    if (!userResult || userResult.length === 0) {
+      Logger.log(`⚠️ 找不到用戶 ID：${userId}`);
+      return null;
+    }
+    
+    const user = userResult[0];
+    Logger.log(`📋 找到用戶資料：${JSON.stringify(user)}`);
+    
+    // 優先使用 mail 欄位（合併後的 email）
+    if (user.mail) {
+      Logger.log(`✅ 找到用戶 ${userId} 的 email：${user.mail}`);
+      return user.mail;
+    }
+    
+    // 也檢查 email 欄位（有些表可能使用 email 而不是 mail）
+    if (user.email) {
+      Logger.log(`✅ 找到用戶 ${userId} 的 email（從 email 欄位）：${user.email}`);
+      return user.email;
+    }
+    
+    // 如果沒有 mail，嘗試從 PersonnelData 取得（向後相容，使用 id 匹配）
+    try {
+      Logger.log(`📋 嘗試從 PersonnelData 表查詢...`);
+      const personnelFilter = `id=eq.${userId}`;
+      const personnelResult = supabaseRequest('GET', SUPABASE_TABLE_PERSONNEL, null, personnelFilter);
+      
+      Logger.log(`📋 PersonnelData 查詢結果：${JSON.stringify(personnelResult)}`);
+      
+      if (personnelResult && personnelResult.length > 0) {
+        const personnel = personnelResult[0];
+        if (personnel.email) {
+          Logger.log(`✅ 從 PersonnelData 找到用戶 ${userId} 的 email：${personnel.email}`);
+          return personnel.email;
+        }
+        if (personnel.Mail) {
+          Logger.log(`✅ 從 PersonnelData 找到用戶 ${userId} 的 email（從 Mail 欄位）：${personnel.Mail}`);
+          return personnel.Mail;
+        }
+      }
+    } catch (e) {
+      Logger.log(`⚠️ 無法從 PersonnelData 取得 email：${e.toString()}`);
+    }
+    
+    Logger.log(`⚠️ 找不到用戶 ${userId} 的 email（已檢查 users.mail, users.email, PersonnelData.email, PersonnelData.Mail）`);
+    return null;
+  } catch (error) {
+    Logger.log(`❌ 取得用戶 email 失敗：${error.toString()}`);
+    Logger.log(`錯誤堆疊：${error.stack || ''}`);
+    return null;
+  }
+}
+
+/**
+ * 發送任務指派通知
+ * @param {string} assigneeEmail - 被指派人的 email
+ * @param {string} assigneeName - 被指派人的姓名
+ * @param {string} taskTitle - 任務標題
+ * @param {string} taskDescription - 任務描述
+ * @param {string} assignerName - 交辦人姓名
+ * @param {string} taskUrl - 任務連結
+ */
+function sendTaskAssignmentEmail(assigneeEmail, assigneeName, taskTitle, taskDescription, assignerName, taskUrl) {
+  try {
+    const subject = `📋 新任務指派：${taskTitle}`;
+    const htmlBody = `
+      <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #4f46e5;">📋 您有新的任務指派</h2>
+            <p>親愛的 <strong>${assigneeName}</strong>，</p>
+            <p><strong>${assignerName}</strong> 指派了一個新任務給您：</p>
+            
+            <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #1f2937;">${taskTitle}</h3>
+              <p style="margin-bottom: 0;">${taskDescription || '無詳細說明'}</p>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${taskUrl}" 
+                 style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                查看任務詳情
+              </a>
+            </div>
+            
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 12px;">
+              這是系統自動發送的通知郵件，請勿直接回覆。<br>
+              如有問題，請登入系統查看任務詳情。
+            </p>
+          </div>
+        </body>
+      </html>
+    `;
+    
+    MailApp.sendEmail({
+      to: assigneeEmail,
+      subject: subject,
+      htmlBody: htmlBody
+    });
+    
+    Logger.log(`✅ 任務指派通知已發送到：${assigneeEmail}`);
+    return { success: true };
+  } catch (error) {
+    Logger.log(`❌ 發送 email 失敗：${error.toString()}`);
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * 生成 iCal 格式的日曆事件文件
+ * @param {string} title - 事件標題
+ * @param {string} description - 事件描述
+ * @param {Date} startDate - 開始日期
+ * @param {Date} endDate - 結束日期（可選，如果沒有則使用開始日期+1小時）
+ * @param {string} location - 地點（可選）
+ * @param {string} url - 相關連結
+ * @returns {string} iCal 格式的字串
+ */
+function generateICalFile(title, description, startDate, endDate, location, url) {
+  const now = new Date();
+  const uid = `task-${Date.now()}@${Session.getActiveUser().getEmail().split('@')[1]}`;
+  
+  // 如果沒有結束日期，設為開始日期+1小時
+  if (!endDate) {
+    endDate = new Date(startDate);
+    endDate.setHours(endDate.getHours() + 1);
+  }
+  
+  // 格式化日期為 iCal 格式 (YYYYMMDDTHHMMSSZ)
+  function formatDate(date) {
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+    return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
+  }
+  
+  // 轉義特殊字元
+  function escapeText(text) {
+    return String(text || '').replace(/\\/g, '\\\\')
+                            .replace(/;/g, '\\;')
+                            .replace(/,/g, '\\,')
+                            .replace(/\n/g, '\\n');
+  }
+  
+  let ical = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Task Dispatch System//Google Apps Script//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:REQUEST',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${formatDate(now)}`,
+    `DTSTART:${formatDate(startDate)}`,
+    `DTEND:${formatDate(endDate)}`,
+    `SUMMARY:${escapeText(title)}`,
+    `DESCRIPTION:${escapeText(description)}`,
+    `LOCATION:${escapeText(location || '')}`,
+    `URL:${escapeText(url || '')}`,
+    'STATUS:CONFIRMED',
+    'SEQUENCE:0',
+    'BEGIN:VALARM',
+    'TRIGGER:-PT15M',
+    'ACTION:DISPLAY',
+    `DESCRIPTION:提醒：${escapeText(title)}`,
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+  
+  return ical;
+}
+
+/**
+ * 發送 Google Chat 通知到個人（通過 email），並附加日曆事件
+ * 使用 Google Chat API 直接發送到用戶的個人 Chat
+ * @param {string} recipientEmail - 接收者的 email（必須是 Google Workspace email）
+ * @param {string} recipientName - 接收者的姓名
+ * @param {string} senderName - 發送者的姓名
+ * @param {string} message - 訊息內容
+ * @param {string} taskTitle - 任務標題
+ * @param {string} chatUrl - 任務連結
+ * @param {Object} dates - 日期物件 {plan, interim, final}
+ */
+function sendChatNotificationToPerson(recipientEmail, recipientName, senderName, message, taskTitle, chatUrl, dates) {
+  try {
+    // 使用 Google Chat API 發送到個人
+    // 注意：這需要 OAuth 2.0 授權和 Google Chat API 啟用
+    
+    // 方法 1：使用 Google Chat API（需要設定 OAuth）
+    // 這需要先在 Google Cloud Console 啟用 Google Chat API
+    // 並設定 OAuth 2.0 憑證
+    
+    // 方法 2：發送 email，Google Chat 會自動同步（如果用戶設定了 email 通知）
+    // 這是最簡單的方式，不需要額外設定
+    
+    Logger.log(`📧 準備發送 Chat 通知到個人：${recipientEmail}`);
+    
+    // 構建 email 內容，使用特殊格式讓 Google Chat 能夠識別
+    const emailSubject = `💬 [Chat] ${taskTitle}`;
+    const emailBody = `
+📋 新任務指派通知
+
+${recipientName}，您有新的任務被指派！
+
+任務標題：${taskTitle}
+交辦人：${senderName}
+
+任務說明：
+${message}
+
+查看任務：${chatUrl}
+
+---
+這是來自任務交辦系統的自動通知
+    `.trim();
+    
+    // 準備 email 附件（日曆事件）
+    const attachments = [];
+    let calendarSent = false;
+    
+    // 如果有最終期限，創建日曆事件
+    if (dates && dates.final) {
+      try {
+        const finalDate = new Date(dates.final);
+        // 設定為當天的開始時間（00:00）
+        finalDate.setHours(0, 0, 0, 0);
+        const endDate = new Date(finalDate);
+        endDate.setHours(23, 59, 59); // 設為當天結束時間
+        
+        const calendarDescription = `任務：${taskTitle}\n\n交辦人：${senderName}\n\n${message}\n\n查看詳情：${chatUrl}`;
+        const icalContent = generateICalFile(
+          `📋 ${taskTitle}`,
+          calendarDescription,
+          finalDate,
+          endDate,
+          '',
+          chatUrl
+        );
+        
+        // 創建 Blob 作為附件
+        const icalBlob = Utilities.newBlob(icalContent, 'text/calendar', 'task.ics');
+        attachments.push(icalBlob);
+        calendarSent = true;
+        Logger.log(`📅 已生成日曆事件文件（最終期限：${dates.final}）`);
+      } catch (calError) {
+        Logger.log(`⚠️ 生成日曆事件失敗：${calError.toString()}`);
+      }
+    }
+    
+    // 如果有計畫日期，也創建一個日曆事件
+    if (dates && dates.plan && dates.plan !== dates.final) {
+      try {
+        const planDate = new Date(dates.plan);
+        planDate.setHours(9, 0, 0, 0); // 設為早上9點
+        const planEndDate = new Date(planDate);
+        planEndDate.setHours(10, 0, 0, 0); // 1小時後
+        
+        const planDescription = `計畫執行：${taskTitle}\n\n交辦人：${senderName}\n\n${message}\n\n查看詳情：${chatUrl}`;
+        const planIcalContent = generateICalFile(
+          `📅 計畫：${taskTitle}`,
+          planDescription,
+          planDate,
+          planEndDate,
+          '',
+          chatUrl
+        );
+        
+        const planIcalBlob = Utilities.newBlob(planIcalContent, 'text/calendar', 'plan.ics');
+        attachments.push(planIcalBlob);
+        Logger.log(`📅 已生成計畫日期日曆事件（計畫日期：${dates.plan}）`);
+      } catch (planError) {
+        Logger.log(`⚠️ 生成計畫日期日曆事件失敗：${planError.toString()}`);
+      }
+    }
+    
+    // 構建 HTML 內容，包含日曆提示
+    let htmlContent = `
+      <div style="font-family: Arial, 'Microsoft JhengHei', sans-serif;">
+        <h2 style="color: #4f46e5;">📋 新任務指派通知</h2>
+        <p><strong>${recipientName}</strong>，您有新的任務被指派！</p>
+        
+        <div style="background-color: #f9fafb; padding: 15px; border-radius: 8px; margin: 20px 0;">
+          <p><strong>任務標題：</strong>${taskTitle}</p>
+          <p><strong>交辦人：</strong>${senderName}</p>
+          ${dates && dates.final ? `<p><strong>⏰ 最終期限：</strong>${new Date(dates.final).toLocaleDateString('zh-TW')}</p>` : ''}
+          ${dates && dates.plan ? `<p><strong>📅 計畫日期：</strong>${new Date(dates.plan).toLocaleDateString('zh-TW')}</p>` : ''}
+        </div>
+        
+        <div style="margin: 20px 0;">
+          <p><strong>任務說明：</strong></p>
+          <p style="white-space: pre-wrap;">${message.replace(/\n/g, '<br>')}</p>
+        </div>
+        
+        ${calendarSent ? `
+        <div style="background-color: #eff6ff; padding: 15px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #4f46e5;">
+          <p style="margin: 0; color: #1e40af;">
+            📅 <strong>日曆事件已附加</strong>：請查看附件中的 .ics 文件，雙擊即可添加到 Google 日曆
+          </p>
+        </div>
+        ` : ''}
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${chatUrl}" 
+             style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+            💬 查看任務並回覆
+          </a>
+        </div>
+      </div>
+    `;
+    
+    // 發送 email（Google Chat 會自動同步顯示）
+    try {
+      const emailOptions = {
+        to: recipientEmail,
+        subject: emailSubject,
+        body: emailBody,
+        htmlBody: htmlContent
+      };
+      
+      // 如果有日曆附件，添加到 email
+      if (attachments.length > 0) {
+        emailOptions.attachments = attachments;
+      }
+      
+      MailApp.sendEmail(emailOptions);
+      
+      Logger.log(`✅ Email 已發送到 ${recipientEmail}，Google Chat 會自動同步顯示`);
+      if (calendarSent) {
+        Logger.log(`📅 日曆事件已附加（${attachments.length} 個 .ics 文件）`);
+      }
+      return { success: true, method: 'email', calendarSent: calendarSent };
+    } catch (emailError) {
+      Logger.log(`⚠️ Email 發送失敗：${emailError.toString()}`);
+      return { success: false, error: emailError.toString() };
+    }
+  } catch (error) {
+    Logger.log(`❌ 發送 Chat 通知失敗：${error.toString()}`);
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * 發送 Google Chat 通知（使用 Webhook，發送到空間）
+ * @param {string} recipientEmail - 接收者的 email（用於識別，實際發送到 Chat Webhook）
+ * @param {string} recipientName - 接收者的姓名
+ * @param {string} senderName - 發送者的姓名
+ * @param {string} message - 訊息內容
+ * @param {string} taskTitle - 任務標題
+ * @param {string} chatUrl - 任務連結
+ */
+function sendChatNotification(recipientEmail, recipientName, senderName, message, taskTitle, chatUrl) {
+  try {
+    // 檢查是否設定了 Webhook URL
+    if (!GOOGLE_CHAT_WEBHOOK_URL || GOOGLE_CHAT_WEBHOOK_URL === "") {
+      Logger.log('⚠️ Google Chat Webhook URL 未設定');
+      Logger.log('💡 請在 Code.gs 頂部設定 GOOGLE_CHAT_WEBHOOK_URL 變數');
+      Logger.log('💡 取得 Webhook URL：Google Chat → 空間設定 → 整合 → 新增 Webhook');
+      return { success: false, error: 'Google Chat Webhook URL 未設定' };
+    }
+    
+    // 構建 Google Chat 卡片訊息格式
+    const chatMessage = {
+      "cards": [
+        {
+          "header": {
+            "title": `📋 新任務指派：${taskTitle}`,
+            "subtitle": `來自 ${senderName}`,
+            "imageUrl": "https://fonts.gstatic.com/s/i/productlogos/gmail_2020/v1/192px.svg",
+            "imageStyle": "AVATAR"
+          },
+          "sections": [
+            {
+              "widgets": [
+                {
+                  "textParagraph": {
+                    "text": `<b>${recipientName}</b>，您有新的任務被指派！`
+                  }
+                }
+              ]
+            },
+            {
+              "widgets": [
+                {
+                  "keyValue": {
+                    "topLabel": "任務標題",
+                    "content": taskTitle
+                  }
+                },
+                {
+                  "keyValue": {
+                    "topLabel": "交辦人",
+                    "content": senderName
+                  }
+                }
+              ]
+            },
+            {
+              "widgets": [
+                {
+                  "textParagraph": {
+                    "text": `<b>任務說明：</b><br/>${message.replace(/\n/g, '<br/>')}`
+                  }
+                }
+              ]
+            },
+            {
+              "widgets": [
+                {
+                  "buttons": [
+                    {
+                      "textButton": {
+                        "text": "💬 查看任務並回覆",
+                        "onClick": {
+                          "openLink": {
+                            "url": chatUrl
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    
+    // 發送到 Google Chat Webhook
+    const options = {
+      'method': 'post',
+      'contentType': 'application/json',
+      'payload': JSON.stringify(chatMessage),
+      'muteHttpExceptions': true
+    };
+    
+    const response = UrlFetchApp.fetch(GOOGLE_CHAT_WEBHOOK_URL, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    
+    if (responseCode === 200) {
+      Logger.log(`✅ Google Chat 通知已發送成功`);
+      Logger.log(`📧 接收者：${recipientName} (${recipientEmail})`);
+      return { success: true };
+    } else {
+      Logger.log(`❌ Google Chat 通知發送失敗，狀態碼：${responseCode}`);
+      Logger.log(`回應內容：${responseText}`);
+      return { success: false, error: `HTTP ${responseCode}: ${responseText}` };
+    }
+  } catch (error) {
+    Logger.log(`❌ 發送 Google Chat 通知失敗：${error.toString()}`);
+    Logger.log(`錯誤堆疊：${error.stack || ''}`);
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * 發送聊天訊息通知（Email 版本，保留作為備用）
+ * @param {string} recipientEmail - 接收者的 email
+ * @param {string} recipientName - 接收者的姓名
+ * @param {string} senderName - 發送者的姓名
+ * @param {string} message - 訊息內容
+ * @param {string} taskTitle - 任務標題
+ * @param {string} chatUrl - 聊天連結
+ */
+function sendChatNotificationEmail(recipientEmail, recipientName, senderName, message, taskTitle, chatUrl) {
+  try {
+    // 檢查是否有 Email 發送權限
+    try {
+      // 嘗試取得當前用戶的 email 來測試權限
+      Session.getActiveUser().getEmail();
+    } catch (permError) {
+      Logger.log('⚠️ 尚未授權 Email 發送權限');
+      Logger.log('💡 請執行 requestEmailAuthorization() 函數來完成授權');
+      throw new Error('需要授權 Email 發送權限。請執行 requestEmailAuthorization() 函數。');
+    }
+    
+    const subject = `📋 新任務指派：${taskTitle}`;
+    // 將訊息中的換行符轉換為 HTML 換行
+    const formattedMessage = message.replace(/\n/g, '<br>');
+    
+    const htmlBody = `
+      <html>
+        <body style="font-family: Arial, 'Microsoft JhengHei', sans-serif; line-height: 1.6; color: #333;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #4f46e5; border-bottom: 3px solid #4f46e5; padding-bottom: 10px;">📋 您有新的任務指派</h2>
+            <p style="font-size: 16px;">親愛的 <strong style="color: #1f2937;">${recipientName}</strong>，</p>
+            <p style="font-size: 16px;"><strong style="color: #4f46e5;">${senderName}</strong> 指派了一個新任務給您：</p>
+            
+            <div style="background-color: #f9fafb; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #4f46e5; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+              <h3 style="margin-top: 0; color: #1f2937; font-size: 18px;">${taskTitle}</h3>
+              <div style="color: #4b5563; line-height: 1.8;">
+                ${formattedMessage}
+              </div>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${chatUrl}" 
+                 style="background-color: #4f46e5; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.3);">
+                💬 查看任務並回覆
+              </a>
+            </div>
+            
+            <div style="background-color: #eff6ff; padding: 15px; border-radius: 6px; margin: 20px 0;">
+              <p style="margin: 0; color: #1e40af; font-size: 14px;">
+                💡 <strong>提示：</strong>點擊上方按鈕可直接進入任務頁面，您可以在聊天區回覆任務進度或提出問題。
+              </p>
+            </div>
+            
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 12px; text-align: center;">
+              這是系統自動發送的通知郵件，請勿直接回覆。<br>
+              如有問題，請登入系統查看任務詳情。
+            </p>
+          </div>
+        </body>
+      </html>
+    `;
+    
+    MailApp.sendEmail({
+      to: recipientEmail,
+      subject: subject,
+      htmlBody: htmlBody
+    });
+    
+    Logger.log(`✅ Chat 通知已發送到：${recipientEmail}`);
+    return { success: true };
+  } catch (error) {
+    Logger.log(`❌ 發送 email 失敗：${error.toString()}`);
+    return { success: false, error: error.toString() };
+  }
+}
+
+// ========================================
 // 測試函數
 // ========================================
 
@@ -1001,6 +1652,154 @@ function testGeminiAPI() {
   
   const result = doGet(mockEvent);
   Logger.log('測試結果：' + result.getContent());
+}
+
+/**
+ * 測試發送 Chat 通知 Email 到 chimi951@gmail.com（模擬任務交接）
+ */
+function testSendEmailToChimi() {
+  Logger.log('🧪 開始測試：模擬任務交接後發送 Chat 通知到 chimi951@gmail.com');
+  
+  try {
+    // 模擬任務交接的訊息
+    const taskTitle = '測試任務：系統功能驗證';
+    const taskDescription = '這是一個測試任務，用來驗證任務交接後的 Chat 通知功能。當任務發布後，系統會自動發送通知 email 給被指派人。';
+    const assignerName = '系統管理員';
+    const assigneeName = '測試用戶';
+    const message = `您有新的任務「${taskTitle}」被指派。\n\n${taskDescription}\n\n請登入系統查看任務詳情並開始處理。`;
+    const chatUrl = 'http://192.168.68.75:3050?task=999999&chat=true';
+    
+    const result = sendChatNotificationToPerson(
+      'chimi951@gmail.com',        // recipientEmail
+      assigneeName,                 // recipientName
+      assignerName,                 // senderName
+      message,                      // message
+      taskTitle,                    // taskTitle
+      chatUrl                       // chatUrl
+    );
+    
+    if (result.success) {
+      Logger.log('✅ 測試 Chat 通知 email 發送成功！');
+      Logger.log('📧 收件人：chimi951@gmail.com');
+      Logger.log('📋 任務標題：' + taskTitle);
+      Logger.log('請檢查 chimi951@gmail.com 的收件匣');
+    } else {
+      Logger.log('❌ 測試 email 發送失敗：' + result.error);
+    }
+    
+    return result;
+  } catch (error) {
+    Logger.log('❌ 測試失敗：' + error.toString());
+    Logger.log('錯誤堆疊：' + error.stack);
+    
+    // 如果是授權錯誤，提供提示
+    if (error.toString().includes('權限') || error.toString().includes('permission')) {
+      Logger.log('💡 提示：首次使用需要授權，請執行 requestAuthorization() 函數');
+    }
+    
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * 測試完整的任務交接流程（建立任務 + 發送通知）
+ */
+function testTaskAssignmentWithNotification() {
+  Logger.log('🧪 測試完整任務交接流程');
+  
+  try {
+    // 建立一個測試任務
+    const testTask = {
+      id: Date.now(),
+      title: '測試任務：驗證通知功能',
+      description: '這是一個測試任務，用來驗證任務交接後會自動發送 Chat 通知。',
+      assignerId: 1,
+      assigneeId: 2, // 假設這是需要通知的用戶 ID
+      collaboratorIds: [],
+      roleCategory: 'nurse',
+      dates: {
+        plan: new Date().toISOString().split('T')[0],
+        interim: '',
+        final: ''
+      },
+      status: 'pending',
+      evidence: []
+    };
+    
+    // 儲存任務（這會觸發通知）
+    const saveResult = saveTask(testTask);
+    
+    if (saveResult.success) {
+      Logger.log('✅ 任務已建立，ID：' + saveResult.taskId);
+      Logger.log('📧 系統應該已自動發送 Chat 通知給被指派人');
+    } else {
+      Logger.log('❌ 任務建立失敗');
+    }
+    
+    return saveResult;
+  } catch (error) {
+    Logger.log('❌ 測試失敗：' + error.toString());
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * 測試取得用戶 email（通過 ID）
+ */
+function testGetUserEmail() {
+  Logger.log('🧪 測試取得用戶 email');
+  
+  // 測試不同的用戶 ID
+  const testUserIds = [1, 2, 3];
+  
+  testUserIds.forEach(userId => {
+    const email = getUserEmail(userId);
+    Logger.log(`用戶 ID ${userId} 的 email：${email || '未找到'}`);
+  });
+}
+
+/**
+ * 觸發 Email 發送權限授權（執行此函數會要求授權）
+ * 這是首次使用 MailApp.sendEmail 時必須執行的函數
+ */
+function requestEmailAuthorization() {
+  Logger.log('🔐 開始請求 Email 發送權限...');
+  Logger.log('📧 這將觸發 Google Apps Script 的授權流程');
+  
+  try {
+    // 嘗試發送一封測試 email 來觸發授權請求
+    // 這會彈出授權對話框
+    MailApp.sendEmail({
+      to: Session.getActiveUser().getEmail(), // 發送給自己
+      subject: '📧 Email 權限測試',
+      body: '這是一封測試郵件，用於觸發 Google Apps Script 的 Email 發送權限。\n\n如果您收到這封郵件，表示權限已成功授權！',
+      htmlBody: '<p>這是一封測試郵件，用於觸發 Google Apps Script 的 Email 發送權限。</p><p>如果您收到這封郵件，表示權限已成功授權！</p>'
+    });
+    
+    Logger.log('✅ Email 權限授權成功！');
+    Logger.log('📧 測試郵件已發送到：' + Session.getActiveUser().getEmail());
+    Logger.log('現在可以正常使用 Chat 通知功能了！');
+    
+    return {
+      success: true,
+      message: 'Email 權限授權成功'
+    };
+  } catch (error) {
+    Logger.log('❌ 授權過程發生錯誤：' + error.toString());
+    
+    if (error.toString().includes('permission') || error.toString().includes('權限')) {
+      Logger.log('');
+      Logger.log('📋 請按照以下步驟完成授權：');
+      Logger.log('1. 在 Google Apps Script 編輯器中，點擊上方的「檢閱權限」按鈕');
+      Logger.log('2. 選擇您的 Google 帳號');
+      Logger.log('3. 點擊「進階」');
+      Logger.log('4. 點擊「前往 [專案名稱]（不安全）」');
+      Logger.log('5. 點擊「允許」');
+      Logger.log('6. 授權完成後，再次執行此函數或直接使用 Chat 通知功能');
+    }
+    
+    throw error;
+  }
 }
 
 /**

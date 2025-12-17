@@ -48,7 +48,7 @@ export interface User {
   id: number;
   name: string;
   role: string;
-  avatar: string;
+  level: number; // 層級：1-5，第1層為最高
 }
 
 export interface ApiResponse<T = any> {
@@ -424,11 +424,14 @@ export async function getTask(taskId: number): Promise<ApiResponse<Task>> {
  */
 export async function createUser(user: Omit<User, 'id'>): Promise<ApiResponse<User>> {
   try {
+    // 確保層級不會是 5（統一改為 4）
+    const userLevel = user.level === 5 ? 4 : (user.level || 4);
+    
     const userData = {
       id: Date.now(),
       name: user.name || '',
       role: user.role || '',
-      avatar: user.avatar || '👤'
+      level: userLevel // 預設為員工（層級 4）
     };
 
     console.log('準備發送員工資料到 Supabase：', userData);
@@ -453,12 +456,63 @@ export async function createUser(user: Omit<User, 'id'>): Promise<ApiResponse<Us
         id: createdUser.id,
         name: createdUser.name,
         role: createdUser.role,
-        avatar: createdUser.avatar || '👤'
+        level: createdUser.level || 5
       }
     };
 
   } catch (error) {
     console.error('建立員工時發生錯誤：', error);
+    const errorMessage = error instanceof Error ? error.message : '未知錯誤';
+    
+    return {
+      success: false,
+      error: errorMessage,
+    };
+  }
+}
+
+/**
+ * 更新員工資料
+ */
+export async function updateUser(user: User): Promise<ApiResponse<User>> {
+  try {
+    // 確保層級不會是 5（統一改為 4）
+    const userLevel = user.level === 5 ? 4 : (user.level || 4);
+    
+    const userData = {
+      name: user.name || '',
+      role: user.role || '',
+      level: userLevel
+    };
+
+    console.log('準備更新員工資料到 Supabase：', userData);
+
+    const response = await fetch(`${API_BASE_URL}/users?id=eq.${user.id}`, {
+      method: 'PATCH',
+      headers: createHeaders(),
+      body: JSON.stringify(userData),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    const result = await response.json();
+    const updatedUser = Array.isArray(result) ? result[0] : result;
+
+    return {
+      success: true,
+      data: {
+        id: updatedUser.id,
+        name: updatedUser.name,
+        role: updatedUser.role,
+        level: updatedUser.level || 5
+      }
+    };
+
+  } catch (error) {
+    console.error('更新員工時發生錯誤：', error);
     const errorMessage = error instanceof Error ? error.message : '未知錯誤';
     
     return {
@@ -531,15 +585,63 @@ export async function getUsers(): Promise<ApiResponse<User[]>> {
     
     return {
       success: true,
-      data: users.map((user: any) => ({
-        id: user.id,
-        name: user.name || '',
-        role: user.role || '',
-        avatar: user.avatar || '👤'
-      }))
+      data: users.map((user: any) => {
+        // 確保層級不會是 5（統一改為 4）
+        const userLevel = user.level === 5 ? 4 : (user.level || 4);
+        return {
+          id: user.id,
+          name: user.name || '',
+          role: user.role || '',
+          level: userLevel
+        };
+      })
     };
   } catch (error) {
     console.error('取得人員列表時發生錯誤：', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '未知錯誤',
+      data: []
+    };
+  }
+}
+
+/**
+ * 取得不重複的角色列表（使用 SQL 查詢，效能較佳）
+ * 只獲取 role 欄位，減少資料傳輸量
+ */
+export async function getRoles(): Promise<ApiResponse<string[]>> {
+  try {
+    // 使用 PostgREST 的 select 參數，只獲取 role 欄位
+    // 這樣可以大幅減少資料傳輸量
+    const response = await fetch(`${API_BASE_URL}/users?select=role`, {
+      method: 'GET',
+      headers: createHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    const result = await response.json();
+    const roles = Array.isArray(result) ? result : [];
+    
+    // 提取不重複的 role 值，過濾掉空值
+    const uniqueRoles = Array.from(
+      new Set(
+        roles
+          .map((item: any) => item.role)
+          .filter((role: string | null | undefined) => role != null && role !== '')
+      )
+    ) as string[];
+    
+    return {
+      success: true,
+      data: uniqueRoles
+    };
+  } catch (error) {
+    console.error('取得角色列表時發生錯誤：', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : '未知錯誤',

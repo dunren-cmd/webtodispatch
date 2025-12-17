@@ -1,0 +1,144 @@
+// ========================================
+// Email 通知功能範例代碼
+// 將這些函數添加到 Code.gs 中
+// ========================================
+
+/**
+ * 發送任務指派通知
+ */
+function sendTaskAssignmentEmail(assigneeEmail, assigneeName, taskTitle, taskDescription, assignerName, taskUrl) {
+  try {
+    const subject = `📋 新任務指派：${taskTitle}`;
+    const htmlBody = `
+      <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #4f46e5;">📋 您有新的任務指派</h2>
+            <p>親愛的 <strong>${assigneeName}</strong>，</p>
+            <p><strong>${assignerName}</strong> 指派了一個新任務給您：</p>
+            
+            <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #1f2937;">${taskTitle}</h3>
+              <p style="margin-bottom: 0;">${taskDescription || '無詳細說明'}</p>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${taskUrl}" 
+                 style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                查看任務詳情
+              </a>
+            </div>
+            
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 12px;">
+              這是系統自動發送的通知郵件，請勿直接回覆。<br>
+              如有問題，請登入系統查看任務詳情。
+            </p>
+          </div>
+        </body>
+      </html>
+    `;
+    
+    MailApp.sendEmail({
+      to: assigneeEmail,
+      subject: subject,
+      htmlBody: htmlBody
+    });
+    
+    Logger.log(`✅ 任務指派通知已發送到：${assigneeEmail}`);
+    return { success: true };
+  } catch (error) {
+    Logger.log(`❌ 發送 email 失敗：${error.toString()}`);
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * 發送聊天訊息通知
+ */
+function sendChatNotificationEmail(recipientEmail, recipientName, senderName, message, taskTitle, chatUrl) {
+  try {
+    const subject = `💬 來自 ${senderName} 的新訊息`;
+    const htmlBody = `
+      <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #4f46e5;">💬 您有新的訊息</h2>
+            <p>親愛的 <strong>${recipientName}</strong>，</p>
+            <p><strong>${senderName}</strong> 在任務 <strong>${taskTitle}</strong> 中發送了一則訊息：</p>
+            
+            <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4f46e5;">
+              <p style="margin: 0;">${message}</p>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${chatUrl}" 
+                 style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                查看完整對話
+              </a>
+            </div>
+            
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 12px;">
+              這是系統自動發送的通知郵件，請勿直接回覆。
+            </p>
+          </div>
+        </body>
+      </html>
+    `;
+    
+    MailApp.sendEmail({
+      to: recipientEmail,
+      subject: subject,
+      htmlBody: htmlBody
+    });
+    
+    Logger.log(`✅ 聊天通知已發送到：${recipientEmail}`);
+    return { success: true };
+  } catch (error) {
+    Logger.log(`❌ 發送 email 失敗：${error.toString()}`);
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * 從 users 或 personnel 表取得用戶 email
+ */
+function getUserEmail(userId) {
+  try {
+    // 方法 1：從 users 表取得（如果 users 表有 email 欄位）
+    const filter = `id=eq.${userId}`;
+    const result = supabaseRequest('GET', SUPABASE_TABLE_USERS, null, filter);
+    
+    if (result && result.length > 0 && result[0].email) {
+      return result[0].email;
+    }
+    
+    // 方法 2：從 personnel 表取得（通過 employee_id 關聯）
+    // 這裡需要根據實際的關聯邏輯調整
+    // const employeeId = result[0].employee_id;
+    // const personnelResult = supabaseRequest('GET', 'personnel', null, `employee_id=eq.${employeeId}`);
+    // if (personnelResult && personnelResult.length > 0) {
+    //   return personnelResult[0].email;
+    // }
+    
+    return null;
+  } catch (error) {
+    Logger.log(`❌ 取得用戶 email 失敗：${error.toString()}`);
+    return null;
+  }
+}
+
+/**
+ * 測試發送 Email（請將 test@example.com 替換為您的 email）
+ */
+function testSendEmail() {
+  sendTaskAssignmentEmail(
+    'test@example.com',  // 替換為您的 email
+    '測試用戶',
+    '測試任務標題',
+    '這是一個測試任務描述',
+    '交辦人姓名',
+    'http://192.168.68.75:3050'
+  );
+}
