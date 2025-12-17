@@ -3,13 +3,20 @@
 // ========================================
 
 // Supabase 配置
-// 注意：這些值應該從環境變數或配置檔案讀取，這裡為了簡化直接寫在程式碼中
-// 在生產環境中，建議使用環境變數
-const SUPABASE_URL = 'http://192.168.68.75:54321'; // 本地 Supabase API 服務（端口 54321）
-const SUPABASE_ANON_KEY = 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH'; // 從 supabase status 取得的 Publishable key
+// 從環境變數讀取，如果沒有則使用預設值（向後相容）
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'http://192.168.68.75:54321';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
 
 // Supabase REST API 基礎 URL
-const API_BASE_URL = `${SUPABASE_URL}/rest/v1`;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${SUPABASE_URL}/rest/v1`;
+
+// 開發模式下顯示配置資訊
+if (import.meta.env.DEV) {
+  console.log('🔧 環境配置：');
+  console.log('  SUPABASE_URL:', SUPABASE_URL);
+  console.log('  SUPABASE_ANON_KEY:', SUPABASE_ANON_KEY ? `${SUPABASE_ANON_KEY.substring(0, 20)}...` : '未設定');
+  console.log('  API_BASE_URL:', API_BASE_URL);
+}
 
 // ========================================
 // 型別定義

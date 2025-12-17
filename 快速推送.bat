@@ -17,7 +17,7 @@ git status --short
 echo.
 
 echo [3/4] 提交變更...
-git commit -m "更新：添加 roles 表與 users 表一對多關聯，支援 Webhook 設定，同步角色資料到 Supabase，包含所有 Supabase 遷移文件"
+git commit -m "新增：資料庫資料同步功能，環境變數配置，支援導出和同步資料庫資料內容到 seed.sql，確保所有環境資料結構和內容完全一致"
 if errorlevel 1 (
     echo ⚠️  提交失敗或沒有變更需要提交
 ) else (
@@ -47,12 +47,29 @@ echo 完成！
 echo ========================================
 echo.
 echo 已推送的文件包括：
-echo   ✅ api.ts - 新增 roles 表 API 函數（getRolesFromSupabase, saveRoleToSupabase, updateRoleInSupabase）
-echo   ✅ src/App.tsx - 角色管理功能更新，支援 Webhook，同步到 Supabase
-echo   ✅ supabase/migrations/20251215000000_create_roles_table.sql - roles 表遷移文件
-echo   ✅ supabase/migrations/20251214000000_fix_users_table_structure.sql - users 表結構修復
-echo   ✅ supabase/seed.sql
-echo   ✅ supabase/config.toml
-echo   ✅ 所有相關的說明文件
+echo   ✅ 資料庫資料同步功能：
+echo      - 導出資料庫資料_完整版.bat
+echo      - 導出資料庫資料.bat
+echo      - 導出資料庫資料_自動版.bat
+echo      - 生成資料導出SQL.sql
+echo      - 資料庫資料同步說明.md
+echo   ✅ 環境變數配置：
+echo      - .env.example
+echo      - api.ts（已更新使用環境變數）
+echo      - vite.config.ts（已更新支援環境變數）
+echo      - Code.gs（已更新配置管理）
+echo      - 環境變數設定說明.md
+echo      - Code.gs配置說明.md
+echo   ✅ 啟動指南：
+echo      - 快速啟動指南.md
+echo      - 完整啟動指南.md
+echo      - start.bat
+echo   ✅ 資料庫相關：
+echo      - supabase/seed.sql（已更新）
+echo      - supabase/migrations/*.sql
+echo   ✅ 其他更新：
+echo      - README.md（已更新）
+echo      - api.ts（roles 表 API 函數）
+echo      - src/App.tsx（角色管理功能更新）
 echo.
 pause

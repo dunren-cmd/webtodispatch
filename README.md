@@ -1,49 +1,180 @@
-# 任務交辦系統 - 前端應用程式
+# 任務交辦系統
 
-## 🚀 快速啟動
+智慧化成果管理系統 - 任務交辦暨統計儀表板
 
-### 1. 安裝依賴套件
+## 🚀 快速開始
 
-```bash
-npm install
-```
+### 從 Git 拉取代碼後
 
-### 2. 啟動開發伺服器
+1. **安裝依賴**
+   ```bash
+   npm install
+   ```
 
-```bash
-npm run dev
-```
+2. **設定環境變數**
+   ```bash
+   # Windows
+   copy .env.example .env
+   
+   # Linux/Mac
+   cp .env.example .env
+   ```
+   
+   然後編輯 `.env` 文件，填入你的 Supabase 配置：
+   ```env
+   VITE_SUPABASE_URL=http://你的IP:54321
+   VITE_SUPABASE_ANON_KEY=你的Supabase_ANON_KEY
+   ```
 
-### 3. 開啟瀏覽器
+3. **啟動 Supabase**
+   ```bash
+   supabase start
+   ```
+   
+   取得配置：
+   ```bash
+   supabase status
+   ```
 
-啟動成功後，瀏覽器會自動開啟 `http://localhost:3000`
+4. **執行資料庫遷移和種子資料**
+   ```bash
+   # 重置資料庫（會執行所有 migrations 和 seed.sql）
+   supabase db reset
+   
+   # 或只執行遷移（如果只需要結構）
+   supabase migration up
+   
+   # 然後執行種子資料（如果需要資料內容）
+   supabase db seed
+   ```
+   
+   這會執行所有遷移文件，確保資料庫**結構**和**資料內容**都一致。
 
-如果沒有自動開啟，請手動在瀏覽器中輸入：
-```
-http://localhost:3000
-```
+5. **啟動應用**
+   ```bash
+   npm run dev
+   ```
 
-## 📋 專案結構
+或直接執行 `start.bat`（Windows）自動完成以上步驟。
+
+## 📁 專案結構
 
 ```
 WebToDispatch_2/
 ├── src/
-│   ├── App.tsx          # 主要應用程式元件
-│   ├── main.tsx          # 應用程式入口
-│   └── index.css         # 全域樣式
-├── api.ts                # API 呼叫函數
-├── Code.gs               # Google Apps Script 後端（需部署）
-├── index.html            # HTML 模板
-├── package.json          # 專案設定檔
-├── vite.config.ts        # Vite 設定檔
-├── tsconfig.json         # TypeScript 設定檔
-└── tailwind.config.js    # Tailwind CSS 設定檔
+│   ├── App.tsx          # 主應用程式
+│   ├── main.tsx         # 入口文件
+│   └── index.css        # 樣式
+├── supabase/
+│   ├── migrations/      # 資料庫遷移文件
+│   ├── config.toml      # Supabase 配置
+│   └── seed.sql         # 種子資料
+├── api.ts               # API 服務（Supabase 通訊）
+├── Code.gs              # Google Apps Script 後端
+├── .env.example         # 環境變數範本
+├── .env                 # 環境變數（不提交到 Git）
+└── package.json         # 專案依賴
 ```
 
-## 🔧 開發指令
+## 🔧 環境變數
+
+所有配置都在 `.env` 文件中：
+
+```env
+# Supabase 配置
+VITE_SUPABASE_URL=http://192.168.68.75:54321
+VITE_SUPABASE_ANON_KEY=sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
+
+# 前端應用程式配置
+VITE_APP_PORT=3050
+VITE_APP_HOST=0.0.0.0
+```
+
+**重要：**
+- `.env` 文件不會提交到 Git
+- 每個環境需要自己創建 `.env` 文件
+- 參考 `.env.example` 作為範本
+
+## 📊 資料庫結構
+
+### 表結構
+
+- **users** - 用戶表
+  - `id` (BIGINT, PRIMARY KEY)
+  - `name` (TEXT)
+  - `role` (TEXT, FOREIGN KEY → roles.id)
+  - `level` (INTEGER, 1-4)
+  - `mail` (TEXT)
+  - `employee_id` (TEXT)
+  - `headshot` (TEXT)
+
+- **tasks** - 任務表
+  - `id` (BIGINT, PRIMARY KEY)
+  - `title` (TEXT)
+  - `description` (TEXT)
+  - `assigner_id` (BIGINT)
+  - `assignee_id` (BIGINT)
+  - `role_category` (TEXT)
+  - `status` (TEXT)
+  - `evidence` (JSONB)
+
+- **roles** - 角色表（一對多關聯）
+  - `id` (TEXT, PRIMARY KEY)
+  - `name` (TEXT)
+  - `level` (INTEGER, 1-4)
+  - `webhook` (TEXT)
+  - `icon_name` (TEXT)
+  - `color` (TEXT)
+
+### 關聯關係
+
+```
+roles (一)  ──────<  users (多)
+  id              role (外鍵)
+```
+
+## 🔄 資料庫遷移
+
+所有遷移文件在 `supabase/migrations/` 目錄中，按時間戳順序執行：
+
+1. `20251212134638_init.sql` - 創建 users 和 tasks 表
+2. `20251212170000_merge_personnel_to_users.sql` - 添加 mail, employee_id, headshot
+3. `20251213000000_change_avatar_to_level.sql` - 添加 level，移除 avatar
+4. `20251213120000_update_level5_to_level4.sql` - 更新 level 5 為 4
+5. `20251214000000_fix_users_table_structure.sql` - 修復 users 表結構
+6. `20251215000000_create_roles_table.sql` - 創建 roles 表並建立關聯
+
+**執行遷移：**
+```bash
+supabase migration up
+```
+
+## 🌍 不同環境配置
+
+### 開發環境
+
+```env
+VITE_SUPABASE_URL=http://192.168.68.75:54321
+VITE_SUPABASE_ANON_KEY=從 supabase status 取得
+```
+
+### 其他電腦
+
+1. 修改 `.env` 中的 `VITE_SUPABASE_URL` 為該電腦的 IP
+2. 執行 `supabase status` 取得該電腦的 `anon key`
+3. 更新 `.env` 中的 `VITE_SUPABASE_ANON_KEY`
+
+### 生產環境
+
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=生產環境Key
+```
+
+## 📝 開發指令
 
 ```bash
-# 啟動開發伺服器（熱重載）
+# 開發模式
 npm run dev
 
 # 建置生產版本
@@ -53,63 +184,83 @@ npm run build
 npm run preview
 ```
 
-## 📝 注意事項
+## 🔍 驗證資料庫
 
-1. **API 設定**：確認 `api.ts` 中的 `API_URL` 已正確設定為你的 Google Apps Script Web App URL
-2. **後端部署**：確認 `Code.gs` 已部署到 Google Apps Script 並設定為 Web App
-3. **試算表 ID**：確認 `Code.gs` 中的 `SPREADSHEET_ID` 已正確設定
+### 檢查表是否存在
 
-## 🐛 疑難排解
+在 Supabase Studio SQL Editor 中執行：
 
-### 問題 1：`npm install` 失敗
-
-**解決方案**：
-- 確認 Node.js 版本：`node --version`（應該 >= 16）
-- 清除快取：`npm cache clean --force`
-- 刪除 `node_modules` 資料夾和 `package-lock.json`，重新執行 `npm install`
-
-### 問題 2：無法連接到後端 API
-
-**檢查**：
-1. 確認 `api.ts` 中的 `API_URL` 是否正確
-2. 確認 Google Apps Script 已部署為 Web App
-3. 檢查瀏覽器開發者工具的 Console 和 Network 標籤
-
-### 問題 3：樣式沒有顯示
-
-**解決方案**：
-- 確認 Tailwind CSS 已正確安裝
-- 重新啟動開發伺服器
-
-## 🚀 推送到 GitHub
-
-### 快速推送
-
-**方法 1：使用批處理文件（推薦）**
-```bash
-推送到_GitHub.bat
+```sql
+SELECT table_name 
+FROM information_schema.tables 
+WHERE table_schema = 'public'
+ORDER BY table_name;
 ```
 
-**方法 2：使用 PowerShell 腳本**
-```powershell
-.\推送到_GitHub.ps1
+應該看到：`users`, `tasks`, `roles`
+
+### 檢查關聯
+
+```sql
+SELECT
+  tc.constraint_name,
+  tc.table_name,
+  kcu.column_name,
+  ccu.table_name AS foreign_table_name
+FROM information_schema.table_constraints AS tc
+JOIN information_schema.key_column_usage AS kcu
+  ON tc.constraint_name = kcu.constraint_name
+JOIN information_schema.constraint_column_usage AS ccu
+  ON ccu.constraint_name = tc.constraint_name
+WHERE tc.constraint_type = 'FOREIGN KEY'
+  AND tc.table_schema = 'public';
 ```
 
-**方法 3：手動執行**
-```bash
-git init
-git add .
-git commit -m "初始提交：任務交辦系統"
-git remote add origin https://github.com/你的用戶名/倉庫名稱.git
-git branch -M main
-git push -u origin main
-```
+應該看到 `fk_users_role` 約束。
 
-詳細說明請參考：`推送到_GitHub_說明.md`
+## 📊 資料庫資料同步
+
+### 確保資料內容一致
+
+除了資料庫結構，資料內容也需要同步：
+
+1. **導出當前資料**
+   ```bash
+   # 執行導出腳本
+   導出資料庫資料_完整版.bat
+   ```
+   
+   或在 Supabase Studio 中執行 `生成資料導出SQL.sql` 中的查詢
+
+2. **更新 seed.sql**
+   - 將導出的 INSERT 語句貼到 `supabase/seed.sql`
+   - 使用 `ON CONFLICT` 避免重複插入
+
+3. **在其他環境中執行**
+   ```bash
+   supabase db reset  # 會執行所有 migrations 和 seed.sql
+   ```
+
+詳細說明請參考：[資料庫資料同步說明](./資料庫資料同步說明.md)
 
 ## 📚 相關文件
 
-- `快速設定指南.md` - 完整的設定步驟
-- `串接GoogleSheets準備清單.md` - 準備項目清單
-- `推送到_GitHub_說明.md` - GitHub 推送詳細指南
+- [環境變數設定說明](./環境變數設定說明.md)
+- [快速啟動指南](./快速啟動指南.md)
+- [資料庫資料同步說明](./資料庫資料同步說明.md)
+- [roles_users關聯說明](./roles_users關聯說明.md)
+- [本地端_Supabase_設定](./本地端_Supabase_設定.md)
 
+## ⚠️ 重要提醒
+
+1. **環境變數**：每個環境需要自己創建 `.env` 文件
+2. **資料庫遷移**：拉取代碼後必須執行 `supabase migration up` 或 `supabase db reset`
+3. **資料庫資料**：執行 `supabase db reset` 或 `supabase db seed` 確保資料內容一致
+4. **Supabase 配置**：使用 `supabase status` 取得當前環境的配置
+5. **資料一致性**：
+   - **結構一致性**：確保所有遷移文件都已執行
+   - **資料一致性**：確保 seed.sql 已更新並執行
+
+## 🐛 故障排除
+
+詳見 [快速啟動指南](./快速啟動指南.md) 的故障排除章節。

@@ -28,6 +28,7 @@ dist-ssr
 .env.local
 .env.production
 .env.development
+# 注意：.env.example 應該被提交到 Git，作為範本
 
 # Service Account credentials
 service-account-key.json

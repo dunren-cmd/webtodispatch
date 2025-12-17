@@ -1,3 +1,78 @@
--- Seed file for database initialization
--- This file is executed after migrations during db reset
--- Add your seed data here if needed
+-- ========================================
+-- 資料庫種子資料
+-- 此文件包含所有表的初始資料
+-- 執行方式：supabase db reset 或 supabase db seed
+-- ========================================
+
+-- 注意：
+-- 1. 此文件會在執行 `supabase db reset` 時自動執行
+-- 2. 如果表已存在資料，請先清空或使用 INSERT ... ON CONFLICT
+-- 3. 資料順序很重要：先插入 roles，再插入 users，最後插入 tasks（因為外鍵關聯）
+
+-- ========================================
+-- 1. 清空現有資料（可選，取消註解以啟用）
+-- ========================================
+-- TRUNCATE TABLE tasks CASCADE;
+-- TRUNCATE TABLE users CASCADE;
+-- TRUNCATE TABLE roles CASCADE;
+
+-- ========================================
+-- 2. 插入 roles 表資料
+-- ========================================
+-- 使用 ON CONFLICT 避免重複插入
+-- 格式：INSERT INTO roles (id, name, icon_name, color, level, webhook, is_default, created_at, updated_at) VALUES (...)
+-- 範例：
+-- INSERT INTO roles (id, name, icon_name, color, level, webhook, is_default, created_at, updated_at)
+-- VALUES 
+--   ('role1', '角色名稱1', 'Briefcase', 'bg-blue-100 text-blue-700', 4, NULL, false, NOW(), NOW())
+-- ON CONFLICT (id) DO UPDATE SET
+--   name = EXCLUDED.name,
+--   icon_name = EXCLUDED.icon_name,
+--   color = EXCLUDED.color,
+--   level = EXCLUDED.level,
+--   webhook = EXCLUDED.webhook,
+--   is_default = EXCLUDED.is_default,
+--   updated_at = EXCLUDED.updated_at;
+
+-- ========================================
+-- 3. 插入 users 表資料
+-- ========================================
+-- 格式：INSERT INTO users (id, name, role, level, mail, employee_id, headshot) VALUES (...)
+-- 範例：
+-- INSERT INTO users (id, name, role, level, mail, employee_id, headshot)
+-- VALUES 
+--   (1, '使用者名稱', 'role1', 4, 'email@example.com', 'EMP001', NULL)
+-- ON CONFLICT (id) DO UPDATE SET
+--   name = EXCLUDED.name,
+--   role = EXCLUDED.role,
+--   level = EXCLUDED.level,
+--   mail = EXCLUDED.mail,
+--   employee_id = EXCLUDED.employee_id,
+--   headshot = EXCLUDED.headshot;
+
+-- ========================================
+-- 4. 插入 tasks 表資料
+-- ========================================
+-- 格式：INSERT INTO tasks (id, title, description, assigner_id, assignee_id, role_category, status, evidence, created_at, updated_at) VALUES (...)
+-- 範例：
+-- INSERT INTO tasks (id, title, description, assigner_id, assignee_id, role_category, status, evidence, created_at, updated_at)
+-- VALUES 
+--   (1, '任務標題', '任務描述', 1, 2, 'role1', 'pending', '{}', NOW(), NOW())
+-- ON CONFLICT (id) DO UPDATE SET
+--   title = EXCLUDED.title,
+--   description = EXCLUDED.description,
+--   assigner_id = EXCLUDED.assigner_id,
+--   assignee_id = EXCLUDED.assignee_id,
+--   role_category = EXCLUDED.role_category,
+--   status = EXCLUDED.status,
+--   evidence = EXCLUDED.evidence,
+--   updated_at = EXCLUDED.updated_at;
+
+-- ========================================
+-- 使用說明：
+-- ========================================
+-- 1. 在 Supabase Studio SQL Editor 中執行「生成資料導出SQL.sql」中的查詢
+-- 2. 複製查詢結果（INSERT 語句）
+-- 3. 貼到此文件中對應的位置
+-- 4. 或使用「導出資料庫資料_完整版.bat」自動生成
+-- ========================================

@@ -252,6 +252,17 @@ function supabaseRequest(method, table, data = null, filter = '') {
 
 /**
  * 從指令碼屬性讀取 Supabase 配置
+ * 優先順序：
+ * 1. 指令碼屬性（PropertiesService）- 推薦使用
+ * 2. 常數定義（SUPABASE_URL, SUPABASE_ANON_KEY）
+ * 
+ * 設定指令碼屬性：
+ * 1. 在 Google Apps Script 編輯器中
+ * 2. 點擊「專案設定」（齒輪圖示）
+ * 3. 點擊「指令碼屬性」標籤
+ * 4. 新增屬性：
+ *    - SUPABASE_URL: http://你的IP:54321
+ *    - SUPABASE_ANON_KEY: 你的Supabase_ANON_KEY
  */
 function getSupabaseConfig() {
   try {
@@ -259,15 +270,20 @@ function getSupabaseConfig() {
     const key = PropertiesService.getScriptProperties().getProperty('SUPABASE_ANON_KEY');
     
     if (url && key) {
+      Logger.log('✅ 從指令碼屬性讀取 Supabase 配置');
       return { url: url, key: key };
     }
     
     // 如果指令碼屬性中沒有，使用常數（需要用戶設定）
-    if (SUPABASE_URL !== "YOUR_SUPABASE_URL" && SUPABASE_ANON_KEY !== "YOUR_SUPABASE_ANON_KEY") {
+    if (SUPABASE_URL && SUPABASE_URL !== "YOUR_SUPABASE_URL" && 
+        SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== "YOUR_SUPABASE_ANON_KEY") {
+      Logger.log('⚠️ 使用常數定義的 Supabase 配置（建議改用指令碼屬性）');
       return { url: SUPABASE_URL, key: SUPABASE_ANON_KEY };
     }
     
-    Logger.log('⚠️ 找不到 Supabase 配置，請設定 SUPABASE_URL 和 SUPABASE_ANON_KEY');
+    Logger.log('⚠️ 找不到 Supabase 配置');
+    Logger.log('💡 請設定指令碼屬性或修改 Code.gs 中的常數');
+    Logger.log('   指令碼屬性：SUPABASE_URL, SUPABASE_ANON_KEY');
     return null;
   } catch (error) {
     Logger.log('❌ 讀取 Supabase 配置時發生錯誤：' + error.toString());
