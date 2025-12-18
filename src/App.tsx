@@ -25,14 +25,16 @@ import {
   Settings,
   Edit,
   Trash2,
-  Save
+  Save,
+  Trash
 } from 'lucide-react';
 import { 
   createTask, 
   updateTaskStatus, 
   updateTaskResponse, 
   addEvidence, 
-  deleteEvidence, 
+  deleteEvidence,
+  deleteTask,
   getTasks, 
   getUsers,
   getRoles,
@@ -487,7 +489,7 @@ const EvidenceDisplay = ({ evidence, onDelete }: { evidence: Evidence; onDelete?
     return null;
 };
 
-const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddEvidence, onDeleteEvidence }: {
+const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddEvidence, onDeleteEvidence, onDelete }: {
   task: Task;
   users: User[];
   roles: Role[];
@@ -495,6 +497,7 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddE
   onUpdateResponse: (taskId: number, response: string) => void;
   onAddEvidence: (taskId: number, type: 'stat' | 'image' | 'link') => void;
   onDeleteEvidence: (taskId: number, evidenceId: string) => void;
+  onDelete: (taskId: number) => void;
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [responseEdit, setResponseEdit] = useState(task.assigneeResponse || '');
@@ -512,8 +515,8 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddE
     <div className={`mb-4 rounded-xl border-l-4 shadow-sm bg-white transition-all ${getStatusColor(task)}`}>
       <div className="p-4">
         {/* Header */}
-        <div className="flex justify-between items-start mb-3 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
-          <div className="flex-1">
+        <div className="flex justify-between items-start mb-3">
+          <div className="flex-1 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
             <div className="flex items-center space-x-2 mb-1">
                 <span className={`text-xs px-2 py-0.5 rounded border font-bold ${getStatusColor(task).replace('bg-white', '')}`}>
                     {getStatusLabel(task)}
@@ -524,9 +527,26 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddE
             </div>
             <h3 className="text-lg font-bold text-slate-800">{task.title}</h3>
           </div>
-          <button className="text-slate-400 hover:text-slate-600 ml-2">
-            {isExpanded ? <ChevronUp /> : <ChevronDown />}
-          </button>
+          <div className="flex items-center space-x-2 ml-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (window.confirm(`確定要刪除任務「${task.title}」嗎？此操作無法復原。`)) {
+                  onDelete(task.id);
+                }
+              }}
+              className="text-red-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition-colors"
+              title="刪除任務"
+            >
+              <Trash size={18} />
+            </button>
+            <button 
+              className="text-slate-400 hover:text-slate-600"
+              onClick={() => setIsExpanded(!isExpanded)}
+            >
+              {isExpanded ? <ChevronUp /> : <ChevronDown />}
+            </button>
+          </div>
         </div>
 
         {/* Quick People View */}
@@ -1820,6 +1840,27 @@ export default function App() {
     }
   };
 
+  const handleDeleteTask = async (taskId: number) => {
+    try {
+      const result = await deleteTask(taskId);
+      if (result.success) {
+        // 等待一下讓後端處理完成
+        await new Promise(resolve => setTimeout(resolve, 300));
+        // 重新載入任務列表
+        await loadTasks();
+        alert('任務已成功刪除！');
+      } else {
+        alert('刪除任務失敗：' + (result.error || '未知錯誤'));
+      }
+    } catch (error) {
+      console.error('刪除任務時發生錯誤：', error);
+      // 即使發生錯誤，也嘗試重新載入
+      await new Promise(resolve => setTimeout(resolve, 300));
+      await loadTasks();
+      alert('任務可能已刪除，請檢查任務列表確認');
+    }
+  };
+
   const handleUpdateUser = async (updatedUser: User) => {
     try {
       const result = await updateUser(updatedUser);
@@ -2457,6 +2498,7 @@ export default function App() {
                                 onUpdateResponse={handleUpdateResponse}
                                 onAddEvidence={handleAddEvidence}
                                 onDeleteEvidence={handleDeleteEvidence}
+                                onDelete={handleDeleteTask}
                             />
                         ))
                     )}

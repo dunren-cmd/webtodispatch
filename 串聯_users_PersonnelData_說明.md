@@ -151,7 +151,7 @@ function saveTask(taskData) {
   try {
     const assigneeEmail = getUserEmail(taskData.assigneeId);
     if (assigneeEmail) {
-      const taskUrl = `http://192.168.68.75:3050?task=${taskId}`;
+      const taskUrl = `http://192.168.62.101:3050?task=${taskId}`;
       sendTaskAssignmentEmail(
         assigneeEmail,
         assigneeName,

@@ -82,7 +82,7 @@ WebToDispatch_2/
 
 ```env
 # Supabase 配置
-VITE_SUPABASE_URL=http://192.168.68.75:54321
+VITE_SUPABASE_URL=http://192.168.62.101:54321
 VITE_SUPABASE_ANON_KEY=sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
 
 # 前端應用程式配置
@@ -154,7 +154,7 @@ supabase migration up
 ### 開發環境
 
 ```env
-VITE_SUPABASE_URL=http://192.168.68.75:54321
+VITE_SUPABASE_URL=http://192.168.62.101:54321
 VITE_SUPABASE_ANON_KEY=從 supabase status 取得
 ```
 

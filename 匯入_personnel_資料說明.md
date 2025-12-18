@@ -20,7 +20,7 @@
 
 ### 步驟 1：建立資料表
 
-1. 開啟 Supabase Dashboard (`http://192.168.68.75:54323`)
+1. 開啟 Supabase Dashboard (`http://192.168.62.101:54323`)
 2. 進入 **SQL Editor**
 3. 執行以下 SQL：
 

@@ -47,7 +47,7 @@ supabase status
 ### 環境 A
 
 ```
-SUPABASE_URL: http://192.168.68.75:54321
+SUPABASE_URL: http://192.168.62.101:54321
 SUPABASE_ANON_KEY: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
 ```
 

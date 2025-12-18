@@ -7,7 +7,7 @@
 ### 方法一：使用 Table Editor 添加 ID 欄位
 
 1. **開啟 Supabase Dashboard**
-   - 前往：`http://192.168.68.75:54323`
+   - 前往：`http://192.168.62.101:54323`
    - 進入 **Table Editor**
 
 2. **選擇 PersonnelData 表**

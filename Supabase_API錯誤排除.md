@@ -38,10 +38,10 @@ supabase status
 應該看到類似以下的輸出：
 
 ```
-         API URL: http://192.168.68.75:54321
-     GraphQL URL: http://192.168.68.75:54321/graphql/v1
+         API URL: http://192.168.62.101:54321
+     GraphQL URL: http://192.168.62.101:54321/graphql/v1
           DB URL: postgresql://postgres:postgres@192.168.68.75:54322/postgres
-      Studio URL: http://192.168.68.75:54323
+      Studio URL: http://192.168.62.101:54323
     Inbucket URL: http://192.168.68.75:54324
       JWT secret: ...
         anon key: ...
@@ -65,7 +65,7 @@ supabase start
 
 #### 步驟 1：添加 ID 欄位
 
-1. 開啟 Supabase Dashboard：`http://192.168.68.75:54323`
+1. 開啟 Supabase Dashboard：`http://192.168.62.101:54323`
 2. 進入 **Table Editor**
 3. 選擇 **PersonnelData** 表
 4. 點擊 **Add column** 或欄位圖示

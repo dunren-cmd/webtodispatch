@@ -16,7 +16,7 @@ Could not find the 'level' column of 'users' in the schema cache
 ### 方法一：使用 Supabase SQL Editor（推薦）
 
 1. **打開 Supabase Dashboard**
-   - 訪問 `http://192.168.68.75:54321`（本地 Supabase）
+   - 訪問 `http://192.168.62.101:54321`（本地 Supabase）
    - 或使用 Supabase 雲端服務
 
 2. **進入 SQL Editor**

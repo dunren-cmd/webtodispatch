@@ -4,7 +4,7 @@
 
 // Supabase 配置
 // 從環境變數讀取，如果沒有則使用預設值（向後相容）
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'http://192.168.68.75:54321';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'http://192.168.62.101:54321';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
 
 // Supabase REST API 基礎 URL
@@ -353,6 +353,31 @@ export async function deleteEvidence(
     return { success: true };
   } catch (error) {
     console.error('刪除佐證資料時發生錯誤：', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '未知錯誤',
+    };
+  }
+}
+
+/**
+ * 刪除任務
+ */
+export async function deleteTask(taskId: number): Promise<ApiResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/tasks?id=eq.${taskId}`, {
+      method: 'DELETE',
+      headers: createHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('刪除任務時發生錯誤：', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : '未知錯誤',

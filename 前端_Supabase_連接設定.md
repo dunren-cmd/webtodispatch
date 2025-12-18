@@ -6,7 +6,7 @@
 
 **Supabase URL：**
 ```typescript
-const SUPABASE_URL = 'http://192.168.68.75:54321';
+const SUPABASE_URL = 'http://192.168.62.101:54321';
 ```
 
 **Supabase API Key（Publishable Key）：**
@@ -17,7 +17,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
 **API 基礎 URL：**
 ```typescript
 const API_BASE_URL = `${SUPABASE_URL}/rest/v1`;
-// 實際值：http://192.168.68.75:54321/rest/v1
+// 實際值：http://192.168.62.101:54321/rest/v1
 ```
 
 ---
@@ -26,7 +26,7 @@ const API_BASE_URL = `${SUPABASE_URL}/rest/v1`;
 
 **Supabase URL：**
 ```javascript
-const SUPABASE_URL = "http://192.168.68.75:54321";
+const SUPABASE_URL = "http://192.168.62.101:54321";
 ```
 
 **Supabase API Key：**
@@ -44,10 +44,10 @@ const SUPABASE_ANON_KEY = "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
 - **端口**：`54321`（Supabase API 端口）
 
 ### 完整連接資訊
-- **API URL**：`http://192.168.68.75:54321`
-- **REST API 端點**：`http://192.168.68.75:54321/rest/v1`
-- **GraphQL 端點**：`http://192.168.68.75:54321/graphql/v1`
-- **Studio URL**：`http://192.168.68.75:54323`（通常）
+- **API URL**：`http://192.168.62.101:54321`
+- **REST API 端點**：`http://192.168.62.101:54321/rest/v1`
+- **GraphQL 端點**：`http://192.168.62.101:54321/graphql/v1`
+- **Studio URL**：`http://192.168.62.101:54323`（通常）
 
 ---
 
@@ -64,7 +64,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
 - 執行 `supabase status` 查看服務狀態
 
 ### 3. 網路連接
-- 前端必須能夠訪問 `192.168.68.75:54321`
+- 前端必須能夠訪問 `192.168.62.101:54321`
 - 如果前端運行在不同的設備上，確保網路連接正常
 - 本地開發可以使用 `localhost` 或 `127.0.0.1`
 
@@ -170,7 +170,7 @@ localStorage.setItem('supabase_anon_key', 'sb_publishable_xxxxxxxxxxxxx');
 2. **測試 API 連接**
    在瀏覽器中訪問：
    ```
-   http://192.168.68.75:54321/rest/v1/
+   http://192.168.62.101:54321/rest/v1/
    ```
    應該會看到 PostgREST API 資訊
 

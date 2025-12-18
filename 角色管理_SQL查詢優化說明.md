@@ -210,7 +210,7 @@ const response = await fetch(`${API_BASE_URL}/rpc/get_unique_roles`, {
 ```javascript
 // 測試 API 函數
 const testGetRoles = async () => {
-  const response = await fetch('http://192.168.68.75:54321/rest/v1/users?select=role', {
+  const response = await fetch('http://192.168.62.101:54321/rest/v1/users?select=role', {
     headers: {
       'apikey': 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH',
       'Authorization': 'Bearer sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH'

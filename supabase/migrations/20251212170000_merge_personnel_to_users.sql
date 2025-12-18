@@ -1,5 +1,5 @@
 -- ========================================
--- 合併 PersonnelData 到 users 表
+-- 合併 personnel 到 users 表
 -- ========================================
 
 -- ========================================
@@ -20,14 +20,14 @@ CREATE INDEX IF NOT EXISTS idx_users_employee_id ON users(employee_id);
 CREATE INDEX IF NOT EXISTS idx_users_mail ON users(mail);
 
 -- ========================================
--- 步驟 2：檢查 PersonnelData 表的結構
+-- 步驟 2：檢查 personnel 表的結構
 -- ========================================
 
--- 先查看 PersonnelData 的欄位名稱（確認實際欄位名稱）
+-- 先查看 personnel 的欄位名稱（確認實際欄位名稱）
 SELECT column_name, data_type 
 FROM information_schema.columns 
 WHERE table_schema = 'public' 
-  AND table_name = 'PersonnelData'
+  AND table_name = 'personnel'
 ORDER BY ordinal_position;
 
 -- ========================================
@@ -41,19 +41,19 @@ ORDER BY ordinal_position;
 -- 方法 B：使用 INSERT ... ON CONFLICT（推薦）
 -- 如果 users.id 已存在，則更新；不存在則插入
 
--- 注意：根據實際的 PersonnelData 欄位名稱調整
--- 假設 PersonnelData 有：id, employee_id, name, JobTitle, email, drive_link 等欄位
+-- 注意：根據實際的 personnel 欄位名稱調整
+-- personnel 表有：id, employee_id, name, role, email, drive_link, timestamp 等欄位
 
 INSERT INTO users (id, name, role, mail, headshot, employee_id, timestamp)
 SELECT 
   p.id,
   p.name,
-  p."JobTitle" as role,  -- 注意：如果欄位名是 JobTitle（大小寫混合），需要用引號
-  p."Mail" as mail,  -- 注意：欄位名稱是 Mail（大寫 M），需要用引號
+  p.role,
+  p.email as mail,
   p.drive_link as headshot,  -- 如果 headshot 是 Google Drive 連結
   p.employee_id,
   COALESCE(p.timestamp, NOW()) as timestamp
-FROM "PersonnelData" p
+FROM personnel p
 ON CONFLICT (id) 
 DO UPDATE SET
   name = EXCLUDED.name,
@@ -66,24 +66,7 @@ DO UPDATE SET
 -- 步驟 4：如果欄位名稱不同，使用以下替代方案
 -- ========================================
 
--- 如果 PersonnelData 的欄位名稱是 job_title（小寫+底線）
--- INSERT INTO users (id, name, role, mail, headshot, employee_id, timestamp)
--- SELECT 
---   p.id,
---   p.name,
---   p.job_title as role,
---   p."Mail" as mail,  -- 注意：欄位名稱是 Mail（大寫 M），需要用引號
---   p.drive_link as headshot,
---   p.employee_id,
---   COALESCE(p.timestamp, NOW()) as timestamp
--- FROM "PersonnelData" p
--- ON CONFLICT (id) 
--- DO UPDATE SET
---   name = EXCLUDED.name,
---   role = EXCLUDED.role,
---   mail = EXCLUDED.mail,
---   headshot = EXCLUDED.headshot,
---   employee_id = EXCLUDED.employee_id;
+-- 備註：personnel 表使用 role 欄位（不是 job_title）
 
 -- ========================================
 -- 步驟 5：驗證合併結果
@@ -99,7 +82,7 @@ SELECT
   u.employee_id,
   p.employee_id as personnel_employee_id
 FROM users u
-LEFT JOIN "PersonnelData" p ON u.employee_id = p.employee_id
+LEFT JOIN personnel p ON u.employee_id = p.employee_id
 ORDER BY u.id;
 
 -- 統計

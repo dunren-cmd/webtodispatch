@@ -1,0 +1,51 @@
+#!/bin/bash
+# 從 Windows 上傳 CSV 檔案到 Linux 的指令
+
+echo "============================================================"
+echo "📤 CSV 檔案上傳指令"
+echo "============================================================"
+echo ""
+
+echo "方法 1：使用 SCP（推薦）"
+echo "----------------------------------------"
+echo "在 Windows PowerShell 中執行以下命令："
+echo ""
+echo "scp \"c:\\Users\\dunre\\Desktop\\tasks_rows.csv\" user@linux-ip:/home/dunren/cursor/webtodispatch/WebToDispatch_2/"
+echo "scp \"c:\\Users\\dunre\\Desktop\\users_rows (2).csv\" user@linux-ip:/home/dunren/cursor/webtodispatch/WebToDispatch_2/users_rows.csv"
+echo "scp \"c:\\Users\\dunre\\Desktop\\roles_rows.csv\" user@linux-ip:/home/dunren/cursor/webtodispatch/WebToDispatch_2/"
+echo ""
+echo "（請將 user@linux-ip 替換為實際的 Linux 用戶名和 IP 地址）"
+echo ""
+
+echo "方法 2：使用 WinSCP 或 FileZilla"
+echo "----------------------------------------"
+echo "1. 下載並安裝 WinSCP 或 FileZilla"
+echo "2. 連接到 Linux 伺服器"
+echo "3. 從 Windows Desktop 拖放檔案到 Linux 目錄："
+echo "   /home/dunren/cursor/webtodispatch/WebToDispatch_2/"
+echo ""
+
+echo "方法 3：使用 Python HTTP 伺服器（臨時）"
+echo "----------------------------------------"
+echo "在 Windows PowerShell 中："
+echo "cd c:\\Users\\dunre\\Desktop"
+echo "python -m http.server 8000"
+echo ""
+echo "然後在 Linux 上："
+echo "wget http://windows-ip:8000/tasks_rows.csv"
+echo "wget http://windows-ip:8000/users_rows%20(2).csv -O users_rows.csv"
+echo "wget http://windows-ip:8000/roles_rows.csv"
+echo ""
+
+echo "方法 4：直接複製檔案內容"
+echo "----------------------------------------"
+echo "如果檔案不大，可以："
+echo "1. 在 Windows 上開啟 CSV 檔案"
+echo "2. 複製全部內容"
+echo "3. 在 Linux 上創建檔案並貼上內容"
+echo ""
+
+echo "目標目錄："
+echo "/home/dunren/cursor/webtodispatch/WebToDispatch_2/"
+echo ""
+

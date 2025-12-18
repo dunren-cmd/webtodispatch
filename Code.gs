@@ -4,11 +4,10 @@
 // ========================================
 
 // Supabase 配置（請替換為你的 Supabase 專案資訊）
-const SUPABASE_URL = "http://192.168.68.75:54321"; // 本地 Supabase API 服務（端口 54321）
+const SUPABASE_URL = "http://192.168.62.101:54321"; // 本地 Supabase API 服務（端口 54321）
 const SUPABASE_ANON_KEY = "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH"; // 你的 Supabase Anon Key
 const SUPABASE_TABLE_TASKS = "tasks"; // 任務表名稱
 const SUPABASE_TABLE_USERS = "users"; // 用戶表名稱
-const SUPABASE_TABLE_PERSONNEL = "PersonnelData"; // 員工資料表名稱
 
 // Google Chat Webhook 配置（請替換為實際的 Webhook URL）
 // 如何取得 Webhook URL：
@@ -361,7 +360,7 @@ function saveTask(taskData) {
         const assigneeEmail = getUserEmail(assigneeId);
         Logger.log(`📧 承辦人 email：${assigneeEmail || '未找到'}`);
         if (assigneeEmail) {
-          const taskUrl = `http://192.168.68.75:3050?task=${taskId}`;
+          const taskUrl = `http://192.168.62.101:3050?task=${taskId}`;
           const chatUrl = `${taskUrl}&chat=true`;
           
           // 構建通知訊息內容
@@ -949,8 +948,8 @@ function getUserName(userId) {
 // ========================================
 
 /**
- * 從 users 表取得用戶 email（合併後直接從 users.mail 取得）
- * @param {number} userId - 用戶 ID（對應到 users.id 和 PersonnelData.id）
+ * 從 users 表取得用戶 email
+ * @param {number} userId - 用戶 ID（對應到 users.id）
  * @returns {string|null} 用戶 email，找不到則返回 null
  */
 function getUserEmail(userId) {
@@ -989,30 +988,7 @@ function getUserEmail(userId) {
       return user.email;
     }
     
-    // 如果沒有 mail，嘗試從 PersonnelData 取得（向後相容，使用 id 匹配）
-    try {
-      Logger.log(`📋 嘗試從 PersonnelData 表查詢...`);
-      const personnelFilter = `id=eq.${userId}`;
-      const personnelResult = supabaseRequest('GET', SUPABASE_TABLE_PERSONNEL, null, personnelFilter);
-      
-      Logger.log(`📋 PersonnelData 查詢結果：${JSON.stringify(personnelResult)}`);
-      
-      if (personnelResult && personnelResult.length > 0) {
-        const personnel = personnelResult[0];
-        if (personnel.email) {
-          Logger.log(`✅ 從 PersonnelData 找到用戶 ${userId} 的 email：${personnel.email}`);
-          return personnel.email;
-        }
-        if (personnel.Mail) {
-          Logger.log(`✅ 從 PersonnelData 找到用戶 ${userId} 的 email（從 Mail 欄位）：${personnel.Mail}`);
-          return personnel.Mail;
-        }
-      }
-    } catch (e) {
-      Logger.log(`⚠️ 無法從 PersonnelData 取得 email：${e.toString()}`);
-    }
-    
-    Logger.log(`⚠️ 找不到用戶 ${userId} 的 email（已檢查 users.mail, users.email, PersonnelData.email, PersonnelData.Mail）`);
+    Logger.log(`⚠️ 找不到用戶 ${userId} 的 email（已檢查 users.mail, users.email）`);
     return null;
   } catch (error) {
     Logger.log(`❌ 取得用戶 email 失敗：${error.toString()}`);
@@ -1683,7 +1659,7 @@ function testSendEmailToChimi() {
     const assignerName = '系統管理員';
     const assigneeName = '測試用戶';
     const message = `您有新的任務「${taskTitle}」被指派。\n\n${taskDescription}\n\n請登入系統查看任務詳情並開始處理。`;
-    const chatUrl = 'http://192.168.68.75:3050?task=999999&chat=true';
+    const chatUrl = 'http://192.168.62.101:3050?task=999999&chat=true';
     
     const result = sendChatNotificationToPerson(
       'chimi951@gmail.com',        // recipientEmail

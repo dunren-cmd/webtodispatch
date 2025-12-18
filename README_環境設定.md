@@ -54,7 +54,7 @@ supabase status
 
 輸出範例：
 ```
-API URL: http://192.168.68.75:54321
+API URL: http://192.168.62.101:54321
 anon key: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
 ```
 
@@ -62,7 +62,7 @@ anon key: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
 
 ```env
 # Supabase 配置
-VITE_SUPABASE_URL=http://192.168.68.75:54321
+VITE_SUPABASE_URL=http://192.168.62.101:54321
 VITE_SUPABASE_ANON_KEY=sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
 
 # 前端應用程式配置
@@ -104,7 +104,7 @@ supabase migration list
 ### 開發環境（本地）
 
 ```env
-VITE_SUPABASE_URL=http://192.168.68.75:54321
+VITE_SUPABASE_URL=http://192.168.62.101:54321
 VITE_SUPABASE_ANON_KEY=sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
 VITE_APP_PORT=3050
 VITE_APP_HOST=0.0.0.0

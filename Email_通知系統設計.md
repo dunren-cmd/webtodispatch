@@ -255,7 +255,7 @@ function saveTask(taskData) {
   try {
     const assigneeEmail = getUserEmail(taskData.assigneeId);
     if (assigneeEmail) {
-      const taskUrl = `http://192.168.68.75:3050?task=${taskId}`;
+      const taskUrl = `http://192.168.62.101:3050?task=${taskId}`;
       sendTaskAssignmentEmail(
         assigneeEmail,
         assigneeName,
@@ -286,7 +286,7 @@ function updateTaskStatus(taskId, status) {
       // 通知交辦人
       const assignerEmail = getUserEmail(task.data.assignerId);
       if (assignerEmail) {
-        const taskUrl = `http://192.168.68.75:3050?task=${taskId}`;
+        const taskUrl = `http://192.168.62.101:3050?task=${taskId}`;
         sendTaskStatusChangeEmail(
           assignerEmail,
           task.data.assigner_name,
@@ -408,7 +408,7 @@ function testSendEmail() {
     '測試任務標題',
     '這是一個測試任務描述',
     '交辦人姓名',
-    'http://192.168.68.75:3050'
+    'http://192.168.62.101:3050'
   );
 }
 ```
@@ -454,7 +454,7 @@ if (assigneeEmail && shouldSendEmail(taskData.assigneeId, 'task_assignment')) {
     taskData.title,
     taskData.description,
     assignerName,
-    `http://192.168.68.75:3050?task=${taskId}`
+    `http://192.168.62.101:3050?task=${taskId}`
   );
 }
 ```
@@ -471,7 +471,7 @@ if (recipientEmail && shouldSendEmail(recipientId, 'chat_message')) {
     senderName,
     messageContent,
     taskTitle,
-    `http://192.168.68.75:3050?task=${taskId}&chat=true`
+    `http://192.168.62.101:3050?task=${taskId}&chat=true`
   );
 }
 ```

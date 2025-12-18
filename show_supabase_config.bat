@@ -75,13 +75,13 @@ echo [連接資訊摘要]
 echo ====================================
 echo.
 echo 前端連接的 Supabase：
-echo - URL: http://192.168.68.75:54321
+echo - URL: http://192.168.62.101:54321
 echo - 類型: 本地 Supabase 服務
-echo - API 端點: http://192.168.68.75:54321/rest/v1
+echo - API 端點: http://192.168.62.101:54321/rest/v1
 echo.
 echo 注意：
 echo - 這是本地 Supabase 實例
 echo - 確保 Supabase 服務正在運行（supabase start）
-echo - 確保本機 IP 為 192.168.68.75 或更新為正確的 IP
+echo - 確保本機 IP 為 192.168.62.101 或更新為正確的 IP
 echo.
 pause

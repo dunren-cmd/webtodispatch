@@ -13,12 +13,32 @@ UPDATE users SET level = 5 WHERE level IS NULL;
 -- 步驟 3：將 level 設為 NOT NULL（確保所有記錄都有層級）
 ALTER TABLE users ALTER COLUMN level SET NOT NULL;
 
--- 步驟 4：刪除舊的 avatar 欄位（如果存在）
+-- 步驟 4：刪除依賴 avatar 欄位的視圖（如果存在）
+DROP VIEW IF EXISTS user_with_personnel;
+
+-- 步驟 5：刪除舊的 avatar 欄位（如果存在）
 -- 注意：如果資料庫中還有重要資料，請先備份
 ALTER TABLE users DROP COLUMN IF EXISTS avatar;
 
--- 步驟 5：為 level 欄位建立索引（如果需要根據層級查詢）
+-- 步驟 6：為 level 欄位建立索引（如果需要根據層級查詢）
 CREATE INDEX IF NOT EXISTS idx_users_level ON users(level);
+
+-- 步驟 7：重新創建視圖（不包含 avatar）
+CREATE OR REPLACE VIEW user_with_personnel AS
+SELECT 
+  u.id as user_id,
+  u.timestamp,
+  u.name,
+  u.role,
+  u.level,
+  u.employee_id,
+  p.id as personnel_id,
+  p.employee_id as personnel_employee_id,
+  p.email,
+  p.drive_link,
+  p.role as personnel_role
+FROM users u
+LEFT JOIN personnel p ON u.employee_id = p.employee_id;
 
 -- 驗證：查看修改後的結構
 SELECT column_name, data_type, column_default, is_nullable
