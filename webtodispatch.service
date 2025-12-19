@@ -1,0 +1,32 @@
+[Unit]
+Description=WebToDispatch 任務交辦系統服務
+After=network.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dunren
+Group=dunren
+WorkingDirectory=/home/dunren/cursor/webtodispatch/WebToDispatch_2
+ExecStart=/home/dunren/cursor/webtodispatch/WebToDispatch_2/start_service.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/dunren/cursor/webtodispatch/WebToDispatch_2/service.log
+StandardError=append:/home/dunren/cursor/webtodispatch/WebToDispatch_2/service.log
+
+# 在背景運行設定
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# 環境變數
+Environment="PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+Environment="NODE_ENV=production"
+
+# 資源限制（可選）
+# LimitNOFILE=65536
+# LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
+

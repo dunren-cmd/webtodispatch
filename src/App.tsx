@@ -2,15 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Users, 
   Calendar, 
-  Mic, 
-  Bot, 
   FileText, 
   CheckCircle, 
   AlertCircle, 
   Clock, 
   ChevronDown, 
-  ChevronUp, 
-  Plus, 
+  ChevronUp,
+  ChevronLeft,
+  Plus,
+  Search,
   BarChart3, 
   Upload, 
   Image as ImageIcon,
@@ -31,7 +31,8 @@ import {
 import { 
   createTask, 
   updateTaskStatus, 
-  updateTaskResponse, 
+  updateTaskResponse,
+  updateTaskRoleCategory,
   addEvidence, 
   deleteEvidence,
   deleteTask,
@@ -44,7 +45,6 @@ import {
   createUser,
   updateUser,
   deleteUser,
-  analyzeTaskWithAIGet,
   type Task,
   type User,
   type Evidence,
@@ -56,18 +56,18 @@ import {
 // 預設角色（已移除，由用戶自行建立）
 const DEFAULT_ROLES: Role[] = [];
 
-// 層級標籤對應
+// 層級標籤對應（統一為員工）
 const LEVEL_LABELS: Record<number, string> = {
-  1: '經營者',
-  2: '業務經理',
-  3: '主管',
+  1: '員工',
+  2: '員工',
+  3: '員工',
   4: '員工',
   5: '員工'
 };
 
-// 取得層級標籤
+// 取得層級標籤（統一返回「員工」）
 const getLevelLabel = (level: number): string => {
-  return LEVEL_LABELS[level] || `第${level}層`;
+  return '員工';
 };
 
 // 可用的圖示選項
@@ -245,50 +245,53 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
   multiple?: boolean;
   selectedIds?: number[];
 }) => {
+  // 不預選任何角色
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
-  const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
   
-  // 先根據層級篩選，再根據角色篩選
+  // 取得不重複的角色列表（過濾掉 OT）
+  const availableRoles = Array.from(new Set(users.map(u => u.role).filter(Boolean)))
+    .filter(roleId => roleId.toLowerCase() !== 'ot') // 過濾掉 OT
+    .map(roleId => roles.find(r => r.id === roleId) || {
+      id: roleId,
+      name: roleId,
+      icon: Briefcase,
+      color: 'bg-gray-100 text-gray-700',
+      isDefault: false,
+      level: 4
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      // 院長排第一
+      if (a.name === '院長' && b.name !== '院長') return -1;
+      if (b.name === '院長' && a.name !== '院長') return 1;
+      // 其他按文字遞增排序
+      return a.name.localeCompare(b.name, 'zh-TW');
+    }) as Role[];
+
+  // 根據角色篩選（統一為員工，移除層級篩選）
   let filteredUsers = users;
   
-  // 第一層篩選：層級
-  if (selectedLevel !== null) {
-    filteredUsers = filteredUsers.filter(user => user.level === selectedLevel);
-  }
-  
-  // 第二層篩選：角色
   if (selectedRoleId) {
     filteredUsers = filteredUsers.filter(user => user.role === selectedRoleId);
   }
   
-  // 取得不重複的層級列表（從 users 中提取）
-  const availableLevels = Array.from(new Set(users.map(u => u.level).filter(Boolean)))
-    .sort((a, b) => a - b) as number[];
-  
-  // 取得不重複的角色列表（從已篩選的 users 中提取，過濾掉 OT）
-  const availableRoles = selectedLevel !== null
-    ? Array.from(new Set(filteredUsers.map(u => u.role).filter(Boolean)))
-        .filter(roleId => roleId.toLowerCase() !== 'ot') // 過濾掉 OT
-        .map(roleId => roles.find(r => r.id === roleId) || {
-          id: roleId,
-          name: roleId,
-          icon: Briefcase,
-          color: 'bg-gray-100 text-gray-700',
-          isDefault: false,
-          level: 4
-        })
-        .filter(Boolean) as Role[]
-    : Array.from(new Set(users.map(u => u.role).filter(Boolean)))
-        .filter(roleId => roleId.toLowerCase() !== 'ot') // 過濾掉 OT
-        .map(roleId => roles.find(r => r.id === roleId) || {
-          id: roleId,
-          name: roleId,
-          icon: Briefcase,
-          color: 'bg-gray-100 text-gray-700',
-          isDefault: false,
-          level: 4
-        })
-        .filter(Boolean) as Role[];
+  // 如果沒有選擇角色但有搜尋關鍵字，搜尋所有角色和人員
+  if (!selectedRoleId && searchQuery.trim()) {
+    const query = searchQuery.trim().toLowerCase();
+    // 搜尋角色名稱
+    const matchingRoleIds = availableRoles
+      .filter(role => role.name.toLowerCase().includes(query))
+      .map(role => role.id);
+    // 搜尋人員姓名
+    const matchingUserIds = users
+      .filter(user => user.name.toLowerCase().includes(query))
+      .map(user => user.id);
+    // 合併搜尋結果：顯示匹配角色的所有人員 + 匹配姓名的人員
+    filteredUsers = users.filter(user => 
+      matchingRoleIds.includes(user.role) || matchingUserIds.includes(user.id)
+    );
+  }
 
   const handleSelect = (id: number) => {
     if (multiple) {
@@ -311,57 +314,23 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
         </div>
       ) : (
         <>
-          {/* 第一層篩選：層級（顯示經營者、業務經理、主管、員工） */}
-          <div className="mb-3">
-            <div className="text-xs text-slate-500 mb-2">步驟 1：選擇層級</div>
-            <div className="flex flex-wrap gap-2">
-              {[1, 2, 3, 4].map(level => {
-                const levelUsers = users.filter(u => u.level === level);
-                return (
-                  <button
-                    key={level}
-                    onClick={() => {
-                      setSelectedLevel(level);
-                      setSelectedRoleId(null); // 重置角色選擇
-                    }}
-                    className={`px-3 py-2 text-xs rounded-full border transition-all font-medium ${
-                      selectedLevel === level
-                        ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <span className="font-bold">{getLevelLabel(level)}</span>
-                    <span className="text-slate-400 ml-1">({levelUsers.length})</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 第二層篩選：角色（必須先選擇層級） */}
-          {selectedLevel !== null && availableRoles.length > 0 && (
+          {/* 角色篩選（移除層級篩選） */}
+          {availableRoles.length > 0 && (
             <div className="mb-3">
               <div className="text-xs text-slate-500 mb-2">
-                步驟 2：選擇角色（{getLevelLabel(selectedLevel)} 層級）
+                選擇角色
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setSelectedRoleId(null)}
-                  className={`px-3 py-1 text-xs rounded-full border transition-all ${
-                    selectedRoleId === null
-                      ? 'bg-indigo-100 text-indigo-700 border-indigo-300 font-medium'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  全部角色
-                </button>
                 {availableRoles.map(role => {
                   const RoleIcon = role.icon;
-                  const roleUsers = filteredUsers.filter(u => u.role === role.id);
+                  const roleUsers = users.filter(u => u.role === role.id);
                   return (
                     <button
                       key={role.id}
-                      onClick={() => setSelectedRoleId(role.id)}
+                      onClick={() => {
+                        setSelectedRoleId(role.id);
+                        setSearchQuery(''); // 選擇角色後清空搜尋框
+                      }}
                       className={`flex items-center space-x-1 px-3 py-1 text-xs rounded-full border transition-all ${
                         selectedRoleId === role.id
                           ? 'bg-indigo-100 text-indigo-700 border-indigo-300 font-medium'
@@ -378,21 +347,73 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
             </div>
           )}
 
-          {/* 第三層：人員選擇（細篩，必須先選擇層級） */}
-          {selectedLevel === null ? (
-            <div className="text-sm text-slate-400 italic p-2 bg-slate-50 rounded border border-slate-200">
-              請先選擇層級
+          {/* 人員選擇 */}
+          {!selectedRoleId ? (
+            <div className="mb-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type="text"
+                  className="w-full pl-10 pr-10 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  placeholder="搜尋角色或人員姓名..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    title="清除搜尋"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+              {searchQuery.trim() && filteredUsers.length === 0 && (
+                <div className="text-sm text-slate-400 italic p-2 bg-slate-50 rounded border border-slate-200 mt-2">
+                  找不到符合「{searchQuery}」的角色或人員
+                </div>
+              )}
+              {searchQuery.trim() && filteredUsers.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-xs text-slate-500 mb-2">
+                    搜尋結果（{filteredUsers.length} 人）
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {filteredUsers.map(user => {
+                      const isSelected = multiple ? selectedIds.includes(user.id) : selectedId === user.id;
+                      const userRole = roles.find(r => r.id === user.role);
+                      const RoleIcon = userRole?.icon || Briefcase;
+                      return (
+                        <button
+                          key={user.id}
+                          onClick={() => handleSelect(user.id)}
+                          className={`flex items-center space-x-1 px-3 py-2 rounded-full border transition-all ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-md transform scale-105'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="text-sm font-medium">{user.name}</span>
+                          {userRole && (
+                            <span className="text-xs opacity-70 ml-1">({userRole.name})</span>
+                          )}
+                          {isSelected && <CheckCircle size={14} className="ml-1" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           ) : filteredUsers.length === 0 ? (
             <div className="text-sm text-slate-400 italic p-2 bg-slate-50 rounded border border-slate-200">
-              {selectedRoleId 
-                ? `此層級和角色下沒有員工` 
-                : `此層級下沒有員工`}
+              此角色下沒有員工
             </div>
           ) : (
             <div>
               <div className="text-xs text-slate-500 mb-2">
-                步驟 3：選擇人員（{getLevelLabel(selectedLevel)}{selectedRoleId ? ` - ${roles.find(r => r.id === selectedRoleId)?.name || selectedRoleId}` : ''}）
+                選擇人員（{roles.find(r => r.id === selectedRoleId)?.name || selectedRoleId}）
               </div>
               <div className="flex flex-wrap gap-2">
                 {filteredUsers.map(user => {
@@ -409,9 +430,8 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
                           : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      <span className="text-sm font-bold text-indigo-600">{getLevelLabel(user.level)}</span>
                       <span className="text-sm font-medium">{user.name}</span>
-                      {(!selectedRoleId || !selectedLevel) && userRole && (
+                      {!selectedRoleId && userRole && (
                         <span className="text-xs opacity-70 ml-1">({userRole.name})</span>
                       )}
                       {isSelected && <CheckCircle size={14} className="ml-1" />}
@@ -489,12 +509,13 @@ const EvidenceDisplay = ({ evidence, onDelete }: { evidence: Evidence; onDelete?
     return null;
 };
 
-const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddEvidence, onDeleteEvidence, onDelete }: {
+const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onUpdateRoleCategory, onAddEvidence, onDeleteEvidence, onDelete }: {
   task: Task;
   users: User[];
   roles: Role[];
   onUpdateStatus: (taskId: number, status: Task['status']) => void;
   onUpdateResponse: (taskId: number, response: string) => void;
+  onUpdateRoleCategory: (taskId: number, roleCategory: string) => void;
   onAddEvidence: (taskId: number, type: 'stat' | 'image' | 'link') => void;
   onDeleteEvidence: (taskId: number, evidenceId: string) => void;
   onDelete: (taskId: number) => void;
@@ -502,6 +523,7 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddE
   const [isExpanded, setIsExpanded] = useState(false);
   const [responseEdit, setResponseEdit] = useState(task.assigneeResponse || '');
   const [isEditingResponse, setIsEditingResponse] = useState(false);
+  const [isEditingRoleCategory, setIsEditingRoleCategory] = useState(false);
 
   const assigner = users.find(u => u.id === task.assignerId);
   const assignee = users.find(u => u.id === task.assigneeId);
@@ -521,25 +543,50 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddE
                 <span className={`text-xs px-2 py-0.5 rounded border font-bold ${getStatusColor(task).replace('bg-white', '')}`}>
                     {getStatusLabel(task)}
                 </span>
-                <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                {isEditingRoleCategory ? (
+                  <div className="flex items-center space-x-1">
+                    <select
+                      className="text-xs px-2 py-0.5 rounded border border-indigo-300 bg-white focus:ring-1 focus:ring-indigo-500"
+                      value={task.roleCategory || ''}
+                      onChange={(e) => {
+                        onUpdateRoleCategory(task.id, e.target.value);
+                        setIsEditingRoleCategory(false);
+                      }}
+                      onBlur={() => setIsEditingRoleCategory(false)}
+                      autoFocus
+                    >
+                      {roles
+                        .filter(r => r.id.toLowerCase() !== 'ot')
+                        .sort((a, b) => {
+                          if (a.name === '院長' && b.name !== '院長') return -1;
+                          if (b.name === '院長' && a.name !== '院長') return 1;
+                          return a.name.localeCompare(b.name, 'zh-TW');
+                        })
+                        .map(role => (
+                          <option key={role.id} value={role.id}>{role.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                ) : (
+                  <span 
+                    className={`text-xs px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                      !task.roleCategory || !roles.find(r => r.id === task.roleCategory)
+                        ? 'text-red-500 bg-red-50 border border-red-200 hover:bg-red-100'
+                        : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsEditingRoleCategory(true);
+                    }}
+                    title={!task.roleCategory || !roles.find(r => r.id === task.roleCategory) ? '點擊設定職類歸屬' : '點擊修改職類歸屬'}
+                  >
                     {roles.find(r => r.id === task.roleCategory)?.name || '未分類'}
-                </span>
+                  </span>
+                )}
             </div>
             <h3 className="text-lg font-bold text-slate-800">{task.title}</h3>
           </div>
           <div className="flex items-center space-x-2 ml-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (window.confirm(`確定要刪除任務「${task.title}」嗎？此操作無法復原。`)) {
-                  onDelete(task.id);
-                }
-              }}
-              className="text-red-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition-colors"
-              title="刪除任務"
-            >
-              <Trash size={18} />
-            </button>
             <button 
               className="text-slate-400 hover:text-slate-600"
               onClick={() => setIsExpanded(!isExpanded)}
@@ -553,12 +600,12 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddE
         <div className="flex items-center space-x-4 text-sm text-slate-600 mb-4 bg-white bg-opacity-50 p-2 rounded-lg border border-slate-100">
           <div className="flex items-center" title="交辦人">
             <span className="text-xs text-slate-400 mr-1">交辦:</span>
-            <span>{assigner?.level ? getLevelLabel(assigner.level) : ''} {assigner?.name}</span>
+            <span>{assigner?.name}</span>
           </div>
           <div className="w-px h-4 bg-slate-300"></div>
           <div className="flex items-center" title="承辦人">
             <span className="text-xs text-slate-400 mr-1">承辦:</span>
-            <span>{assignee?.level ? getLevelLabel(assignee.level) : ''} {assignee?.name}</span>
+            <span>{assignee?.name}</span>
           </div>
         </div>
 
@@ -585,7 +632,7 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddE
             {/* 1. Task Description */}
             <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                 <h4 className="text-xs font-bold text-slate-500 mb-2 flex items-center uppercase tracking-wider">
-                    <Bot size={14} className="mr-1 text-indigo-500"/> 任務說明 (AI 生成)
+                    <FileText size={14} className="mr-1 text-indigo-500"/> 任務說明
                 </h4>
                 <div className="text-sm text-slate-700 whitespace-pre-line leading-relaxed pl-1">
                     {task.description}
@@ -693,7 +740,19 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onAddE
             </div>
 
             {/* Actions */}
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end items-center space-x-3 pt-2">
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`確定要刪除任務「${task.title}」嗎？此操作無法復原。`)) {
+                          onDelete(task.id);
+                        }
+                    }}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                    title="刪除任務"
+                >
+                    <Trash size={20} />
+                </button>
                 {task.status !== 'done' && (
                     <button 
                         onClick={() => onUpdateStatus(task.id, 'done')}
@@ -717,19 +776,24 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
   onCancel: () => void;
   onCreate: (task: Omit<Task, 'id'>) => void;
 }) => {
+    // 取得今天的日期（格式：YYYY-MM-DD）
+    const getTodayDate = () => {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
     const [formData, setFormData] = useState({
         title: '',
-        rawDescription: '',
-        aiDescription: '',
+        description: '',
         assignerId: null as number | null,
         assigneeId: null as number | null,
         collaboratorIds: [] as number[],
         roleCategory: 'medical_admin',
-        dates: { plan: '', interim: '', final: '' }
+        dates: { plan: getTodayDate(), interim: '', final: '' }
     });
-    
-    const [isListening, setIsListening] = useState(false);
-    const [isProcessingAI, setIsProcessingAI] = useState(false);
 
     // 如果 roleCategory 是 OT，自動清除
     useEffect(() => {
@@ -741,44 +805,6 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
         }
     }, [roles]);
 
-    const simulateVoiceInput = () => {
-        setIsListening(true);
-        setTimeout(() => {
-            setIsListening(false);
-            setFormData(prev => ({
-                ...prev,
-                rawDescription: '請幫我請李專員去規劃一下這個季度的病房滿意度調查，然後記得要跟護理長還有社工一起討論，大概下個月中要給我結果，中間要先回報一次。'
-            }));
-        }, 1500);
-    };
-
-    const processWithAI = async () => {
-        if (!formData.rawDescription) {
-            alert('請先輸入任務描述');
-            return;
-        }
-        
-        setIsProcessingAI(true);
-        
-        try {
-            const result = await analyzeTaskWithAIGet(formData.rawDescription);
-            
-            if (result.success && result.data) {
-                setFormData(prev => ({
-                    ...prev,
-                    aiDescription: result.data.description
-                }));
-            } else {
-                alert('AI 分析失敗：' + (result.error || '未知錯誤'));
-            }
-        } catch (error) {
-            console.error('AI 分析時發生錯誤：', error);
-            alert('AI 分析時發生錯誤，請稍後再試');
-        } finally {
-            setIsProcessingAI(false);
-        }
-    };
-
     const handleSubmit = () => {
         if (!formData.title || !formData.assigneeId || !formData.dates.final) {
             alert('請填寫完整資訊 (標題、承辦人、最終期限)');
@@ -786,7 +812,7 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
         }
         onCreate({
             title: formData.title,
-            description: formData.aiDescription || formData.rawDescription,
+            description: formData.description,
             assignerId: formData.assignerId,
             assigneeId: formData.assigneeId,
             collaboratorIds: formData.collaboratorIds,
@@ -832,7 +858,16 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
         <div className="mb-6">
             <label className="block text-sm font-medium text-slate-700 mb-2">職類歸屬</label>
             <div className="flex flex-wrap gap-2">
-                {roles.filter(r => r.id.toLowerCase() !== 'ot').map(role => {
+                {roles
+                  .filter(r => r.id.toLowerCase() !== 'ot')
+                  .sort((a, b) => {
+                    // 院長排第一
+                    if (a.name === '院長' && b.name !== '院長') return -1;
+                    if (b.name === '院長' && a.name !== '院長') return 1;
+                    // 其他按名稱遞增排序
+                    return a.name.localeCompare(b.name, 'zh-TW');
+                  })
+                  .map(role => {
                     const RoleIcon = role.icon;
                     return (
                         <button
@@ -852,53 +887,26 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
             </div>
         </div>
 
-        {/* AI Voice Input */}
-        <div className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
-            <label className="block text-sm font-bold text-slate-700 mb-2">4. 任務描述 (AI 語音輔助)</label>
-            <div className="relative mb-3">
-                <textarea 
-                    className="w-full p-3 pr-12 border rounded-lg focus:ring-2 focus:ring-indigo-500 h-24"
-                    placeholder="點擊麥克風開始口述任務..."
-                    value={formData.rawDescription}
-                    onChange={(e) => setFormData({...formData, rawDescription: e.target.value})}
-                />
-                <button 
-                    onClick={simulateVoiceInput}
-                    className={`absolute right-3 top-3 p-2 rounded-full ${isListening ? 'bg-red-500 animate-pulse text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
-                >
-                    <Mic size={20} />
-                </button>
-            </div>
-            
-            <button 
-                onClick={processWithAI}
-                disabled={!formData.rawDescription || isProcessingAI}
-                className="w-full bg-indigo-600 text-white py-2 rounded-lg flex items-center justify-center hover:bg-indigo-700 disabled:opacity-50"
-            >
-                {isProcessingAI ? 'AI 分析中...' : <><Bot className="mr-2" size={18}/> 串接 AI 形成結構化工作任務</>}
-            </button>
-
-            {formData.aiDescription && (
-                <div className="mt-3 bg-white p-3 rounded border border-indigo-100">
-                    <div className="text-xs text-indigo-500 font-bold mb-1">AI 產出結果：</div>
-                    <textarea 
-                        className="w-full text-sm text-slate-700 border-none focus:ring-0 p-0 resize-none h-24"
-                        value={formData.aiDescription}
-                        onChange={(e) => setFormData({...formData, aiDescription: e.target.value})}
-                    />
-                </div>
-            )}
-        </div>
-
-        {/* Basic Info */}
+        {/* Task Title */}
         <div className="mb-6">
-            <label className="block text-sm font-medium text-slate-700 mb-2">任務標題</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">4. 任務標題</label>
             <input 
                 type="text" 
                 className="w-full p-2 border rounded-lg"
                 value={formData.title}
                 onChange={(e) => setFormData({...formData, title: e.target.value})}
                 placeholder="例如：Q3 職安回報"
+            />
+        </div>
+
+        {/* Task Description */}
+        <div className="mb-6">
+            <label className="block text-sm font-medium text-slate-700 mb-2">5. 任務描述</label>
+            <textarea 
+                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 h-32"
+                placeholder="請輸入任務描述..."
+                value={formData.description}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
             />
         </div>
 
@@ -963,7 +971,7 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
   const [formData, setFormData] = useState({
     name: '',
     role: '',
-    level: 4, // 預設為員工（層級 4）
+    level: 4, // 統一為員工
   });
 
   // 使用 useEffect 來更新表單資料，當 editingUser 改變時
@@ -996,10 +1004,8 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
     }
   }, [editingUser, defaultRole, defaultLevel, roles]);
 
-  // 取得選中角色的層級（編輯時可以手動修改層級）
+  // 取得選中角色
   const selectedRole = roles.find(r => r.id === formData.role);
-  // 如果角色的層級是 5，轉換為 4（員工）
-  const roleDefaultLevel = selectedRole?.level === 5 ? 4 : (selectedRole?.level || 4);
 
   const handleSubmit = () => {
     if (!formData.name || !formData.role) {
@@ -1013,14 +1019,14 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
         ...editingUser,
         name: formData.name,
         role: formData.role,
-        level: formData.level
+        level: 4 // 統一為員工
       });
     } else {
       // 新增模式
       onCreate({
         name: formData.name,
         role: formData.role,
-        level: formData.level
+        level: 4 // 統一為員工
       });
     }
   };
@@ -1049,9 +1055,20 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
 
   return (
     <div className="bg-white rounded-xl shadow-lg border p-6 animate-fade-in">
-      <h2 className="text-xl font-bold mb-6 text-slate-800 flex items-center">
-        <Users className="mr-2" /> {isEditing ? '編輯員工資料' : '新增員工資料'}
-      </h2>
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={onCancel}
+            className="text-slate-600 hover:text-slate-800 transition-colors"
+            title="返回"
+          >
+            <ChevronLeft size={24} />
+          </button>
+          <h2 className="text-xl font-bold text-slate-800 flex items-center">
+            <Users className="mr-2" /> {isEditing ? '編輯員工資料' : '新增員工資料'}
+          </h2>
+        </div>
+      </div>
       {isEditing && !editingUser && (
         <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
           ⚠️ 警告：編輯模式下未找到員工資料，請返回重新選擇
@@ -1091,40 +1108,9 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
         </div>
       </div>
 
-      {/* 層級設定 */}
-      <div className="mb-6">
-        <label className="block text-sm font-medium text-slate-700 mb-2">
-          層級 * <span className="text-xs text-slate-400">（經營者為最高，依序到員工）</span>
-        </label>
-        {!isEditing && selectedRole && (
-          <p className="text-xs text-slate-500 mb-2">
-            此角色的預設層級為：{getLevelLabel(roleDefaultLevel)}（可手動調整）
-          </p>
-        )}
-        <div className="grid grid-cols-2 gap-2">
-          {[1, 2, 3, 4].map(level => (
-            <button
-              key={level}
-              onClick={() => setFormData({...formData, level})}
-              className={`px-4 py-3 rounded-lg border-2 transition-all font-medium ${
-                formData.level === level
-                  ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                  : 'border-slate-200 hover:border-slate-300 text-slate-600'
-              }`}
-            >
-              <div className="text-lg font-bold">{getLevelLabel(level)}</div>
-              <div className="text-xs mt-1 text-slate-500">
-                {level === 1 ? '最高層級' : level === 4 ? '一般員工' : ''}
-              </div>
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-slate-400 mt-2">
-          注意：層級 5 已統一改為「員工」（層級 4），請選擇「員工」即可
-        </p>
-      </div>
+      {/* 層級統一為員工，不顯示選擇 */}
 
-        <div className="flex space-x-3">
+        <div className="flex space-x-3 items-center">
           <button onClick={onCancel} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-lg font-medium hover:bg-slate-200">
             取消
           </button>
@@ -1135,9 +1121,10 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
                   onDelete(editingUser.id);
                 }
               }} 
-              className="px-4 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 flex items-center justify-center"
+              className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+              title="刪除員工"
             >
-              <Trash2 size={18} className="mr-2" /> 刪除
+              <Trash2 size={20} />
             </button>
           )}
           <button onClick={handleSubmit} className="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
@@ -1176,7 +1163,7 @@ const CreateRoleForm = ({
     icon: editingRole?.icon || Briefcase,
     color: editingRole?.color || 'bg-blue-100 text-blue-700',
     iconName: editingRole ? getIconName(editingRole.icon) : 'Briefcase',
-    level: editingRole?.level === 5 ? 4 : (editingRole?.level || 4), // 預設為員工（層級 4）
+    level: 4, // 統一為員工
     webhook: editingRole?.webhook || '' // Webhook URL
   });
 
@@ -1195,25 +1182,34 @@ const CreateRoleForm = ({
 
     const selectedIcon = AVAILABLE_ICONS.find(i => i.name === formData.iconName)?.icon || Briefcase;
     
-    // 確保層級不會是 5（統一改為 4）
-    const finalLevel = formData.level === 5 ? 4 : formData.level;
-    
+    // 統一層級為 4（員工）
     onSave({
       id: formData.id,
       name: formData.name,
       icon: selectedIcon,
       color: formData.color,
       isDefault: false,
-      level: finalLevel,
+      level: 4, // 統一為員工
       webhook: formData.webhook.trim() || undefined // 如果為空則設為 undefined
     });
   };
 
   return (
     <div className="bg-white rounded-xl shadow-lg border p-6 animate-fade-in">
-      <h2 className="text-xl font-bold mb-6 text-slate-800 flex items-center">
-        <Settings className="mr-2" /> {editingRole ? '編輯角色' : '新增角色'}
-      </h2>
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={onCancel}
+            className="text-slate-600 hover:text-slate-800 transition-colors"
+            title="返回"
+          >
+            <ChevronLeft size={24} />
+          </button>
+          <h2 className="text-xl font-bold text-slate-800 flex items-center">
+            <Settings className="mr-2" /> {editingRole ? '編輯角色' : '新增角色'}
+          </h2>
+        </div>
+      </div>
 
       {/* 角色 ID */}
       <div className="mb-6">
@@ -1266,33 +1262,7 @@ const CreateRoleForm = ({
         </div>
       </div>
 
-      {/* 層級設定 */}
-      <div className="mb-6">
-        <label className="block text-sm font-medium text-slate-700 mb-2">
-          層級 * <span className="text-xs text-slate-400">（經營者為最高，依序到員工）</span>
-        </label>
-        <div className="grid grid-cols-2 gap-2">
-          {[1, 2, 3, 4].map(level => (
-            <button
-              key={level}
-              onClick={() => setFormData({...formData, level})}
-              className={`px-4 py-3 rounded-lg border-2 transition-all font-medium ${
-                formData.level === level
-                  ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                  : 'border-slate-200 hover:border-slate-300 text-slate-600'
-              }`}
-            >
-              <div className="text-lg font-bold">{getLevelLabel(level)}</div>
-              <div className="text-xs mt-1 text-slate-500">
-                {level === 1 ? '最高層級' : level === 4 ? '一般員工' : ''}
-              </div>
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-slate-400 mt-2">
-          注意：層級 5 已統一改為「員工」（層級 4），請選擇「員工」即可
-        </p>
-      </div>
+      {/* 層級統一為員工，不顯示選擇 */}
 
       {/* Webhook URL */}
       <div className="mb-6">
@@ -1404,7 +1374,16 @@ const RoleManagementView = ({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {roles.filter(r => r.id.toLowerCase() !== 'ot').map(role => {
+        {roles
+          .filter(r => r.id.toLowerCase() !== 'ot')
+          .sort((a, b) => {
+            // 院長排第一
+            if (a.name === '院長' && b.name !== '院長') return -1;
+            if (b.name === '院長' && a.name !== '院長') return 1;
+            // 其他按名稱遞增排序
+            return a.name.localeCompare(b.name, 'zh-TW');
+          })
+          .map(role => {
           // 調試：檢查比對邏輯
           const usersWithRole = users.filter(u => {
             const match = u.role === role.id;
@@ -1810,6 +1789,21 @@ export default function App() {
     }
   };
 
+  const handleUpdateRoleCategory = async (taskId: number, roleCategory: string) => {
+    try {
+      const result = await updateTaskRoleCategory(taskId, roleCategory);
+      if (result.success) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await loadTasks();
+      } else {
+        alert('更新職類歸屬失敗：' + (result.error || '未知錯誤'));
+      }
+    } catch (error) {
+      console.error('更新職類歸屬時發生錯誤：', error);
+      alert('更新職類歸屬時發生錯誤，請稍後再試');
+    }
+  };
+
   const handleUpdateResponse = async (taskId: number, response: string) => {
     try {
       const result = await updateTaskResponse(taskId, response);
@@ -2150,65 +2144,6 @@ export default function App() {
                 <h2 className="text-2xl font-bold text-slate-800 flex items-center">
                   <Users className="mr-2" /> 員工管理
                 </h2>
-              </div>
-              
-              {/* 步驟 1：顯示層級列表 */}
-              <div className="mb-4">
-                <div className="text-xs text-slate-500 mb-2">步驟 1：選擇層級</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {[1, 2, 3, 4].map(level => {
-                    const levelUsers = users.filter(u => u.level === level);
-                    // 取得該層級下的角色（過濾掉 OT）
-                    const levelRoles = roles.filter(r => {
-                      const roleUsers = users.filter(u => u.role === r.id && u.level === level);
-                      return roleUsers.length > 0 && r.id.toLowerCase() !== 'ot';
-                    });
-                    return (
-                      <div 
-                        key={level}
-                        onClick={() => {
-                          setSelectedLevelForUsers(level);
-                          setSelectedRoleForUsers(null);
-                          setView('users-by-level');
-                        }}
-                        className="bg-white rounded-xl shadow-sm border-2 border-slate-200 p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-indigo-300"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center space-x-3 flex-1">
-                            <div className="text-2xl font-bold text-indigo-600">{getLevelLabel(level)}</div>
-                            <div className="flex-1">
-                              <h3 className="font-bold text-slate-800">{getLevelLabel(level)}</h3>
-                              <p className="text-xs text-slate-500">{levelRoles.length} 個角色</p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-sm font-semibold text-indigo-600">
-                          {levelUsers.length} 位員工
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-        ) : view === 'users-by-level' ? (
-            <div className="animate-fade-in">
-              <div className="mb-6 flex justify-between items-center">
-                <div className="flex items-center space-x-3">
-                  <button
-                    onClick={() => {
-                      setSelectedLevelForUsers(null);
-                      setSelectedRoleForUsers(null);
-                      setView('users');
-                    }}
-                    className="text-slate-600 hover:text-slate-800"
-                  >
-                    ← 返回層級列表
-                  </button>
-                  <h2 className="text-2xl font-bold text-slate-800">
-                    {selectedLevelForUsers ? getLevelLabel(selectedLevelForUsers) : '員工管理'}
-                  </h2>
-                </div>
                 <button
                   onClick={() => setView('create-user')}
                   className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-indigo-700 flex items-center"
@@ -2217,25 +2152,24 @@ export default function App() {
                 </button>
               </div>
               
-              {/* 步驟 2：顯示該層級下的角色列表（過濾掉 OT） */}
+              {/* 直接顯示角色卡片網格 */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {selectedLevelForUsers ? (() => {
-                  // 取得該層級下的角色（過濾掉 OT）
-                  const levelRoles = roles.filter(r => {
-                    const roleUsers = users.filter(u => u.role === r.id && u.level === selectedLevelForUsers);
+                {(() => {
+                  // 取得所有有員工的角色（過濾掉 OT）
+                  const rolesWithUsers = roles.filter(r => {
+                    const roleUsers = users.filter(u => u.role === r.id);
                     return roleUsers.length > 0 && r.id.toLowerCase() !== 'ot';
                   });
                   
-                  // 按照角色名稱排序（可選，如果需要）
-                  const sortedLevelRoles = [...levelRoles].sort((a, b) => {
-                    // 可以按照角色名稱排序，或保持原順序
+                  // 按照角色名稱排序
+                  const sortedRoles = [...rolesWithUsers].sort((a, b) => {
                     return a.name.localeCompare(b.name, 'zh-TW');
                   });
                   
-                  return sortedLevelRoles.length === 0 ? (
+                  return sortedRoles.length === 0 ? (
                     <div className="col-span-full text-center py-12 text-slate-400">
                       <Users size={48} className="mx-auto mb-2 opacity-50"/>
-                      <p>此層級下目前沒有角色</p>
+                      <p>目前沒有員工資料</p>
                       <button
                         onClick={() => setView('create-user')}
                         className="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
@@ -2244,8 +2178,8 @@ export default function App() {
                       </button>
                     </div>
                   ) : (
-                    sortedLevelRoles.map(role => {
-                      const usersInRole = users.filter(u => u.role === role.id && u.level === selectedLevelForUsers);
+                    sortedRoles.map(role => {
+                      const usersInRole = users.filter(u => u.role === role.id);
                       const RoleIcon = role.icon;
                       return (
                         <div 
@@ -2274,7 +2208,7 @@ export default function App() {
                       );
                     })
                   );
-                })() : null}
+                })()}
               </div>
             </div>
         ) : view === 'users-by-role' ? (
@@ -2283,17 +2217,12 @@ export default function App() {
                 <div className="flex items-center space-x-3">
                   <button
                     onClick={() => {
-                      if (selectedLevelForUsers) {
-                        setSelectedRoleForUsers(null);
-                        setView('users-by-level');
-                      } else {
-                        setSelectedRoleForUsers(null);
-                        setView('users');
-                      }
+                      setSelectedRoleForUsers(null);
+                      setView('users');
                     }}
                     className="text-slate-600 hover:text-slate-800"
                   >
-                    ← 返回{selectedLevelForUsers ? '層級角色列表' : '角色列表'}
+                    ← 返回角色列表
                   </button>
                   <h2 className="text-2xl font-bold text-slate-800">
                     {selectedRoleForUsers ? roles.find(r => r.id === selectedRoleForUsers)?.name || selectedRoleForUsers : '員工管理'}
@@ -2309,16 +2238,11 @@ export default function App() {
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {selectedRoleForUsers ? (() => {
-                  // 根據層級和角色篩選員工
-                  const roleUsers = selectedLevelForUsers
-                    ? users.filter(u => u.role === selectedRoleForUsers && u.level === selectedLevelForUsers)
-                    : users.filter(u => u.role === selectedRoleForUsers);
-                  // 按照層級排序：1（經營者）> 2（業務經理）> 3（主管）> 4（員工）
+                  // 根據角色篩選員工
+                  const roleUsers = users.filter(u => u.role === selectedRoleForUsers);
+                  // 按照姓名排序
                   const sortedRoleUsers = [...roleUsers].sort((a, b) => {
-                    // 如果層級是 5，轉換為 4（員工）
-                    const levelA = a.level === 5 ? 4 : (a.level || 4);
-                    const levelB = b.level === 5 ? 4 : (b.level || 4);
-                    return levelA - levelB; // 從小到大排序（1 在最前面）
+                    return a.name.localeCompare(b.name, 'zh-TW');
                   });
                   return sortedRoleUsers.length === 0 ? (
                     <div className="col-span-full text-center py-12 text-slate-400">
@@ -2336,7 +2260,6 @@ export default function App() {
                       <div key={user.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 hover:shadow-md transition-shadow">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
-                            <div className="text-xl font-bold text-indigo-600">{getLevelLabel(user.level)}</div>
                             <div className="flex-1">
                               <h3 className="font-bold text-slate-800">{user.name}</h3>
                               <p className="text-sm text-slate-500">
@@ -2496,6 +2419,7 @@ export default function App() {
                                 roles={roles}
                                 onUpdateStatus={handleUpdateStatus}
                                 onUpdateResponse={handleUpdateResponse}
+                                onUpdateRoleCategory={handleUpdateRoleCategory}
                                 onAddEvidence={handleAddEvidence}
                                 onDeleteEvidence={handleDeleteEvidence}
                                 onDelete={handleDeleteTask}

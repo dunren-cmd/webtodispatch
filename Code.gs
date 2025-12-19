@@ -69,10 +69,6 @@ function doPost(e) {
       // 建立新員工
       const result = saveUser(postData.user);
       return createResponse(result);
-    } else if (action === 'analyzeTaskWithAI') {
-      // 使用 Gemini AI 分析任務描述
-      const result = analyzeTaskWithAI(postData.description);
-      return createResponse(result);
     } else if (action === 'updateTaskStatus') {
       // 更新任務狀態
       const result = updateTaskStatus(postData.taskId, postData.status);
@@ -156,12 +152,6 @@ function doGet(e) {
       const taskId = parseInt(e.parameter.taskId);
       Logger.log('查詢任務：' + taskId);
       const result = getTask(taskId);
-      return createResponse(result);
-    } else if (action === 'analyzeTaskWithAI') {
-      // 使用 Gemini AI 分析任務描述
-      const description = e.parameter.description ? decodeURIComponent(e.parameter.description) : '';
-      Logger.log('收到 AI 分析請求，描述長度：' + description.length);
-      const result = analyzeTaskWithAI(description);
       return createResponse(result);
     }
     
@@ -720,137 +710,6 @@ function saveUser(userData) {
   }
 }
 
-// ========================================
-// 從指令碼屬性讀取 Gemini API Key
-// ========================================
-function getGeminiApiKey() {
-  try {
-    // 從指令碼屬性讀取 API Key
-    const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-    
-    if (apiKey && apiKey.toString().startsWith('AIza')) {
-      Logger.log('✅ 成功從指令碼屬性讀取 Gemini API Key');
-      return apiKey.toString();
-    }
-    
-    Logger.log('⚠️ 找不到 Gemini API Key，請確認指令碼屬性中已設定 GEMINI_API_KEY');
-    Logger.log('設定步驟：');
-    Logger.log('1. 在 Google Apps Script 編輯器中');
-    Logger.log('2. 點擊「專案設定」（齒輪圖示）');
-    Logger.log('3. 點擊「指令碼屬性」標籤');
-    Logger.log('4. 新增屬性：名稱 = GEMINI_API_KEY，值 = 你的 API Key');
-    
-    return null;
-  } catch (error) {
-    Logger.log('❌ 讀取 Gemini API Key 時發生錯誤：' + error.toString());
-    return null;
-  }
-}
-
-// ========================================
-// 使用 Gemini 2.5 Pro 分析任務描述
-// ========================================
-function analyzeTaskWithAI(description) {
-  Logger.log('🤖 開始使用 Gemini AI 分析任務描述...');
-  
-  try {
-    if (!description || description.trim() === '') {
-      return {
-        success: false,
-        error: '任務描述為空'
-      };
-    }
-    
-    // 取得 API Key
-    const apiKey = getGeminiApiKey();
-    if (!apiKey) {
-      return {
-        success: false,
-        error: '找不到 Gemini API Key，請確認試算表中已設定 GEMINI_API_KEY'
-      };
-    }
-    
-    // 準備提示詞
-    const prompt = `請將以下任務描述轉換為結構化的工作任務說明，使用繁體中文回答：
-
-任務描述：
-${description}
-
-請以以下格式輸出：
-1. 任務目標
-2. 執行步驟（分點列出）
-3. 注意事項（如果有）
-
-請確保輸出清晰、具體、可執行。`;
-
-    // 調用 Gemini API (使用 Gemini 2.5 Pro)
-    // 如果 Gemini 2.5 Pro 不可用，可以改用 gemini-2.0-flash-exp 或 gemini-1.5-pro
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
-    
-    // 注意：如果要使用 Gemini 2.5 Pro，請將模型名稱改為：
-    // gemini-2.5-pro (如果可用)
-    // 或 gemini-1.5-pro (穩定版本)
-    
-    const payload = {
-      contents: [{
-        parts: [{
-          text: prompt
-        }]
-      }]
-    };
-    
-    const options = {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    };
-    
-    Logger.log('📤 發送請求到 Gemini API...');
-    const response = UrlFetchApp.fetch(apiUrl, options);
-    const responseCode = response.getResponseCode();
-    const responseText = response.getContentText();
-    
-    Logger.log('📥 回應狀態碼：' + responseCode);
-    
-    if (responseCode !== 200) {
-      Logger.log('❌ API 回應錯誤：' + responseText);
-      return {
-        success: false,
-        error: `Gemini API 錯誤：${responseCode} - ${responseText}`
-      };
-    }
-    
-    // 解析回應
-    const responseData = JSON.parse(responseText);
-    
-    if (!responseData.candidates || !responseData.candidates[0] || !responseData.candidates[0].content) {
-      Logger.log('❌ API 回應格式錯誤：' + JSON.stringify(responseData));
-      return {
-        success: false,
-        error: 'API 回應格式錯誤'
-      };
-    }
-    
-    const aiResponse = responseData.candidates[0].content.parts[0].text;
-    
-    Logger.log('✅ AI 分析完成');
-    Logger.log('AI 回應：' + aiResponse.substring(0, 200) + '...');
-    
-    return {
-      success: true,
-      description: aiResponse
-    };
-    
-  } catch (error) {
-    Logger.log('❌ AI 分析時發生錯誤：' + error.toString());
-    Logger.log('錯誤堆疊：' + error.stack);
-    return {
-      success: false,
-      error: error.toString()
-    };
-  }
-}
 
 // ========================================
 // 取得人員列表
@@ -1629,22 +1488,6 @@ function testBasicSetup() {
   }
 }
 
-/**
- * 測試 Gemini AI 分析功能
- */
-function testGeminiAPI() {
-  const testDescription = '請幫我規劃下個月的員工訓練課程，需要包含新進人員培訓和主管管理課程，時間安排在週五下午';
-  
-  const mockEvent = {
-    parameter: {
-      action: 'analyzeTaskWithAI',
-      description: testDescription
-    }
-  };
-  
-  const result = doGet(mockEvent);
-  Logger.log('測試結果：' + result.getContent());
-}
 
 /**
  * 測試發送 Chat 通知 Email 到 chimi951@gmail.com（模擬任務交接）
@@ -1809,7 +1652,7 @@ function requestAuthorization() {
     });
     
     Logger.log('✅ 授權成功！狀態碼：' + response.getResponseCode());
-    Logger.log('現在可以正常使用 Gemini API 了');
+    Logger.log('現在可以正常使用外部 API 了');
     
     return {
       success: true,

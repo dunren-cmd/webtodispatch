@@ -242,6 +242,35 @@ export async function updateTaskStatus(
 }
 
 /**
+ * 更新任務職類歸屬
+ */
+export async function updateTaskRoleCategory(
+  taskId: number,
+  roleCategory: string
+): Promise<ApiResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/tasks?id=eq.${taskId}`, {
+      method: 'PATCH',
+      headers: createHeaders(),
+      body: JSON.stringify({ role_category: roleCategory }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('更新任務職類歸屬時發生錯誤：', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '未知錯誤',
+    };
+  }
+}
+
+/**
  * 更新承辦人回覆
  */
 export async function updateTaskResponse(
@@ -602,48 +631,6 @@ export async function deleteUser(userId: number): Promise<ApiResponse<void>> {
   }
 }
 
-/**
- * 使用 Gemini AI 分析任務描述
- * 注意：這個功能需要透過 Google Apps Script，因為需要 Gemini API Key
- * 如果 Google Apps Script 已設定，可以透過它來調用
- */
-export async function analyzeTaskWithAI(description: string): Promise<ApiResponse<{ description: string }>> {
-  try {
-    // 如果 Google Apps Script URL 可用，使用它
-    // 否則返回提示訊息
-    const googleScriptUrl = 'https://script.google.com/macros/s/AKfycbzpdPkr96-Kc36TAYU3poKqOw2Do6GpXi6AMgJWgUDft9uD8EBoGyw4-VRJOgiiMAqZKw/exec';
-    
-    const encodedDescription = encodeURIComponent(description);
-    const params = new URLSearchParams({
-      action: 'analyzeTaskWithAI',
-      description: encodedDescription
-    });
-
-    const response = await fetch(`${googleScriptUrl}?${params.toString()}`, {
-      method: 'GET',
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const result: ApiResponse<{ description: string }> = await response.json();
-    return result;
-  } catch (error) {
-    console.error('AI 分析時發生錯誤：', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : '未知錯誤',
-    };
-  }
-}
-
-/**
- * 使用 Gemini AI 分析任務描述（使用 GET 方式）
- */
-export async function analyzeTaskWithAIGet(description: string): Promise<ApiResponse<{ description: string }>> {
-  return analyzeTaskWithAI(description);
-}
 
 /**
  * 取得人員列表
