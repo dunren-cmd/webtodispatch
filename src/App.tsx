@@ -236,6 +236,19 @@ const getStatusLabel = (task: Task) => {
 
 // --- Components ---
 
+// 輔助函數：檢查用戶的角色是否包含指定的角色ID（支援多個角色，逗號分隔）
+const userHasRole = (userRole: string, roleId: string): boolean => {
+  if (!userRole) return false;
+  // 如果 userRole 是逗號分隔的字串，檢查是否包含 roleId
+  return userRole.split(',').map(r => r.trim()).includes(roleId);
+};
+
+// 輔助函數：取得用戶的所有角色ID（從逗號分隔的字串轉換為陣列）
+const getUserRoleIds = (userRole: string): string[] => {
+  if (!userRole) return [];
+  return userRole.split(',').map(r => r.trim()).filter(Boolean);
+};
+
 const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = false, selectedIds = [] }: {
   label: string;
   users: User[];
@@ -250,8 +263,15 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
   const [searchQuery, setSearchQuery] = useState<string>('');
   
   // 取得不重複的角色列表（過濾掉 OT）
-  const availableRoles = Array.from(new Set(users.map(u => u.role).filter(Boolean)))
-    .filter(roleId => roleId.toLowerCase() !== 'ot') // 過濾掉 OT
+  // 從所有用戶的角色中提取（支援多個角色，逗號分隔）
+  const allRoleIds = users
+    .map(u => getUserRoleIds(u.role))
+    .flat()
+    .filter(Boolean);
+  const uniqueRoleIds = Array.from(new Set(allRoleIds))
+    .filter(roleId => roleId.toLowerCase() !== 'ot'); // 過濾掉 OT
+  
+  const availableRoles = uniqueRoleIds
     .map(roleId => roles.find(r => r.id === roleId) || {
       id: roleId,
       name: roleId,
@@ -273,7 +293,7 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
   let filteredUsers = users;
   
   if (selectedRoleId) {
-    filteredUsers = filteredUsers.filter(user => user.role === selectedRoleId);
+    filteredUsers = filteredUsers.filter(user => userHasRole(user.role, selectedRoleId));
   }
   
   // 如果沒有選擇角色但有搜尋關鍵字，搜尋所有角色和人員
@@ -288,9 +308,10 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
       .filter(user => user.name.toLowerCase().includes(query))
       .map(user => user.id);
     // 合併搜尋結果：顯示匹配角色的所有人員 + 匹配姓名的人員
-    filteredUsers = users.filter(user => 
-      matchingRoleIds.includes(user.role) || matchingUserIds.includes(user.id)
-    );
+    filteredUsers = users.filter(user => {
+      const userRoleIds = getUserRoleIds(user.role);
+      return userRoleIds.some(roleId => matchingRoleIds.includes(roleId)) || matchingUserIds.includes(user.id);
+    });
   }
 
   const handleSelect = (id: number) => {
@@ -323,7 +344,7 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
               <div className="flex flex-wrap gap-2">
                 {availableRoles.map(role => {
                   const RoleIcon = role.icon;
-                  const roleUsers = users.filter(u => u.role === role.id);
+                  const roleUsers = users.filter(u => userHasRole(u.role, role.id));
                   return (
                     <button
                       key={role.id}
@@ -382,8 +403,11 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
                   <div className="flex flex-wrap gap-2">
                     {filteredUsers.map(user => {
                       const isSelected = multiple ? selectedIds.includes(user.id) : selectedId === user.id;
-                      const userRole = roles.find(r => r.id === user.role);
-                      const RoleIcon = userRole?.icon || Briefcase;
+                      const userRoleIds = getUserRoleIds(user.role);
+                      // 如果有多個角色，顯示所有角色名稱
+                      const roleNames = userRoleIds
+                        .map(roleId => roles.find(r => r.id === roleId)?.name || roleId)
+                        .join('、');
                       return (
                         <button
                           key={user.id}
@@ -395,8 +419,8 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
                           }`}
                         >
                           <span className="text-sm font-medium">{user.name}</span>
-                          {userRole && (
-                            <span className="text-xs opacity-70 ml-1">({userRole.name})</span>
+                          {roleNames && (
+                            <span className="text-xs opacity-70 ml-1">({roleNames})</span>
                           )}
                           {isSelected && <CheckCircle size={14} className="ml-1" />}
                         </button>
@@ -418,8 +442,11 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
               <div className="flex flex-wrap gap-2">
                 {filteredUsers.map(user => {
                   const isSelected = multiple ? selectedIds.includes(user.id) : selectedId === user.id;
-                  const userRole = roles.find(r => r.id === user.role);
-                  const RoleIcon = userRole?.icon || Briefcase;
+                  const userRoleIds = getUserRoleIds(user.role);
+                  // 如果有多個角色，顯示所有角色名稱
+                  const roleNames = userRoleIds
+                    .map(roleId => roles.find(r => r.id === roleId)?.name || roleId)
+                    .join('、');
                   return (
                     <button
                       key={user.id}
@@ -431,8 +458,8 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
                       }`}
                     >
                       <span className="text-sm font-medium">{user.name}</span>
-                      {!selectedRoleId && userRole && (
-                        <span className="text-xs opacity-70 ml-1">({userRole.name})</span>
+                      {!selectedRoleId && roleNames && (
+                        <span className="text-xs opacity-70 ml-1">({roleNames})</span>
                       )}
                       {isSelected && <CheckCircle size={14} className="ml-1" />}
                     </button>
@@ -970,9 +997,20 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
   const isEditing = !!editingUser;
   const [formData, setFormData] = useState({
     name: '',
-    role: '',
+    roles: [] as string[], // 改為陣列以支援複選
     level: 4, // 統一為員工
   });
+
+  // 將逗號分隔的字串轉換為陣列（向後相容）
+  const parseRoles = (roleString: string | undefined | null): string[] => {
+    if (!roleString) return [];
+    return roleString.split(',').map(r => r.trim()).filter(Boolean);
+  };
+
+  // 將陣列轉換為逗號分隔的字串
+  const joinRoles = (rolesArray: string[]): string => {
+    return rolesArray.join(',');
+  };
 
   // 使用 useEffect 來更新表單資料，當 editingUser 改變時
   useEffect(() => {
@@ -989,43 +1027,66 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
       });
       // 如果層級是 5，轉換為 4（員工）
       const userLevel = editingUser.level === 5 ? 4 : (editingUser.level || 4);
+      // 將 role 字串（可能是逗號分隔）轉換為陣列
+      const userRoles = parseRoles(editingUser.role);
       setFormData({
         name: editingUser.name || '',
-        role: editingUser.role || defaultRole || (roles.length > 0 ? roles[0].id : ''),
+        roles: userRoles.length > 0 ? userRoles : (defaultRole ? [defaultRole] : []),
         level: userLevel,
       });
     } else {
       console.log('➕ 初始化新增表單');
       setFormData({
         name: '',
-        role: defaultRole || (roles.length > 0 ? roles[0].id : ''),
+        roles: defaultRole ? [defaultRole] : [],
         level: defaultLevel || 4, // 使用傳入的層級或預設為員工（層級 4）
       });
     }
   }, [editingUser, defaultRole, defaultLevel, roles]);
 
-  // 取得選中角色
-  const selectedRole = roles.find(r => r.id === formData.role);
+  // 切換角色選中狀態
+  const toggleRole = (roleId: string) => {
+    setFormData(prev => {
+      const currentRoles = prev.roles;
+      if (currentRoles.includes(roleId)) {
+        // 如果已選中，移除它
+        return { ...prev, roles: currentRoles.filter(r => r !== roleId) };
+      } else {
+        // 如果未選中，新增它
+        return { ...prev, roles: [...currentRoles, roleId] };
+      }
+    });
+  };
 
   const handleSubmit = () => {
-    if (!formData.name || !formData.role) {
-      alert('請填寫完整資訊 (姓名、角色)');
+    if (!formData.name || formData.roles.length === 0) {
+      alert('請填寫完整資訊 (姓名、至少選擇一個角色)');
       return;
     }
+    
+    // 驗證所有選擇的角色是否存在於 roles 列表中
+    const invalidRoles = formData.roles.filter(roleId => !roles.find(r => r.id === roleId));
+    if (invalidRoles.length > 0) {
+      alert(`錯誤：以下角色不存在：${invalidRoles.join(', ')}`);
+      return;
+    }
+    
+    // 將角色陣列轉換為逗號分隔的字串
+    const roleString = joinRoles(formData.roles);
     
     if (isEditing && editingUser && onUpdate) {
       // 編輯模式
       onUpdate({
         ...editingUser,
         name: formData.name,
-        role: formData.role,
+        role: roleString,
         level: 4 // 統一為員工
       });
     } else {
       // 新增模式
       onCreate({
         name: formData.name,
-        role: formData.role,
+        role: roleString,
         level: 4 // 統一為員工
       });
     }
@@ -1087,24 +1148,33 @@ const CreateUserForm = ({ roles, defaultRole, defaultLevel, editingUser, onCance
         />
       </div>
 
-      {/* 角色 */}
+      {/* 角色（複選） */}
       <div className="mb-6">
-        <label className="block text-sm font-medium text-slate-700 mb-2">角色 *</label>
+        <label className="block text-sm font-medium text-slate-700 mb-2">
+          角色 * {formData.roles.length > 0 && (
+            <span className="text-xs text-slate-500 font-normal">(已選擇 {formData.roles.length} 個)</span>
+          )}
+        </label>
         <div className="flex flex-wrap gap-2">
-          {sortedRoles.map(role => (
-            <button
-              key={role.id}
-              onClick={() => setFormData({...formData, role: role.id})}
-              className={`px-3 py-2 text-sm rounded-full transition-colors flex items-center ${
-                formData.role === role.id 
-                ? 'bg-indigo-600 text-white shadow-md' 
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              <role.icon size={14} className="mr-2"/>
-              {role.name}
-            </button>
-          ))}
+          {sortedRoles.map(role => {
+            const isSelected = formData.roles.includes(role.id);
+            return (
+              <button
+                key={role.id}
+                type="button"
+                onClick={() => toggleRole(role.id)}
+                className={`px-3 py-2 text-sm rounded-full transition-colors flex items-center ${
+                  isSelected
+                  ? 'bg-indigo-600 text-white shadow-md' 
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <role.icon size={14} className="mr-2"/>
+                {role.name}
+                {isSelected && <CheckCircle size={14} className="ml-1" />}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1339,8 +1409,8 @@ const RoleManagementView = ({
       return;
     }
 
-    // 檢查是否有員工使用此角色
-    const usersWithRole = users.filter(u => u.role === role.id);
+    // 檢查是否有員工使用此角色（支援多角色）
+    const usersWithRole = users.filter(u => userHasRole(u.role, role.id));
     if (usersWithRole.length > 0) {
       alert(`無法刪除：仍有 ${usersWithRole.length} 位員工使用此角色\n請先修改這些員工的角色設定`);
       return;
@@ -1385,13 +1455,7 @@ const RoleManagementView = ({
           })
           .map(role => {
           // 調試：檢查比對邏輯
-          const usersWithRole = users.filter(u => {
-            const match = u.role === role.id;
-            if (!match && u.role) {
-              console.log(`角色不匹配: user.role="${u.role}" (類型: ${typeof u.role}), role.id="${role.id}" (類型: ${typeof role.id})`);
-            }
-            return match;
-          });
+          const usersWithRole = users.filter(u => userHasRole(u.role, role.id));
           console.log(`角色 ${role.name} (${role.id}): 找到 ${usersWithRole.length} 位員工`, usersWithRole);
           const IconComponent = role.icon;
           
@@ -1498,7 +1562,10 @@ export default function App() {
         if (result.data.length > 0) {
           console.log('📋 載入的員工資料詳情：', result.data);
           console.log('📊 角色統計：', result.data.reduce((acc: any, user: User) => {
-            acc[user.role] = (acc[user.role] || 0) + 1;
+            const roleIds = getUserRoleIds(user.role);
+            roleIds.forEach(roleId => {
+              acc[roleId] = (acc[roleId] || 0) + 1;
+            });
             return acc;
           }, {}));
           console.log('📊 層級統計：', result.data.reduce((acc: any, user: User) => {
@@ -1555,7 +1622,7 @@ export default function App() {
             icon_name: AVAILABLE_ICONS.find(i => i.icon === role.icon)?.name || 'Briefcase',
             color: role.color,
             level: role.level === 5 ? 4 : (role.level || 4),
-            webhook: role.webhook || null,
+            webhook: role.webhook || undefined,
             is_default: role.isDefault || false
           };
 
@@ -1976,7 +2043,7 @@ export default function App() {
         icon_name: AVAILABLE_ICONS.find(i => i.icon === role.icon)?.name || 'Briefcase',
         color: role.color,
         level: role.level === 5 ? 4 : (role.level || 4),
-        webhook: role.webhook || null,
+        webhook: role.webhook || undefined,
         is_default: role.isDefault || false
       };
 
@@ -2155,14 +2222,18 @@ export default function App() {
               {/* 直接顯示角色卡片網格 */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(() => {
-                  // 取得所有有員工的角色（過濾掉 OT）
+                  // 取得所有有員工的角色（過濾掉 OT，支援多角色）
                   const rolesWithUsers = roles.filter(r => {
-                    const roleUsers = users.filter(u => u.role === r.id);
+                    const roleUsers = users.filter(u => userHasRole(u.role, r.id));
                     return roleUsers.length > 0 && r.id.toLowerCase() !== 'ot';
                   });
                   
-                  // 按照角色名稱排序
+                  // 排序：院長排第一，其他按名稱遞增排序
                   const sortedRoles = [...rolesWithUsers].sort((a, b) => {
+                    // 院長排第一
+                    if (a.name === '院長' && b.name !== '院長') return -1;
+                    if (b.name === '院長' && a.name !== '院長') return 1;
+                    // 其他按名稱遞增排序
                     return a.name.localeCompare(b.name, 'zh-TW');
                   });
                   
@@ -2179,7 +2250,7 @@ export default function App() {
                     </div>
                   ) : (
                     sortedRoles.map(role => {
-                      const usersInRole = users.filter(u => u.role === role.id);
+                      const usersInRole = users.filter(u => userHasRole(u.role, role.id));
                       const RoleIcon = role.icon;
                       return (
                         <div 
@@ -2238,8 +2309,8 @@ export default function App() {
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {selectedRoleForUsers ? (() => {
-                  // 根據角色篩選員工
-                  const roleUsers = users.filter(u => u.role === selectedRoleForUsers);
+                  // 根據角色篩選員工（支援多角色）
+                  const roleUsers = users.filter(u => userHasRole(u.role, selectedRoleForUsers));
                   // 按照姓名排序
                   const sortedRoleUsers = [...roleUsers].sort((a, b) => {
                     return a.name.localeCompare(b.name, 'zh-TW');
@@ -2263,7 +2334,9 @@ export default function App() {
                             <div className="flex-1">
                               <h3 className="font-bold text-slate-800">{user.name}</h3>
                               <p className="text-sm text-slate-500">
-                                {roles.find(r => r.id === user.role)?.name || user.role}
+                                {getUserRoleIds(user.role)
+                                  .map(roleId => roles.find(r => r.id === roleId)?.name || roleId)
+                                  .join('、') || user.role}
                               </p>
                             </div>
                           </div>
