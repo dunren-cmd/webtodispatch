@@ -45,6 +45,7 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  sendGoogleChatNotification,
   type Task,
   type User,
   type Evidence,
@@ -271,6 +272,10 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
   const uniqueRoleIds = Array.from(new Set(allRoleIds))
     .filter(roleId => roleId.toLowerCase() !== 'ot'); // 過濾掉 OT
   
+  // 如果是交辦人，只顯示指定的角色
+  const allowedRoleNamesForAssigner = ['院長', '主任', '總務', '護理長', '東寧'];
+  const isAssigner = label.includes('交辦人');
+  
   const availableRoles = uniqueRoleIds
     .map(roleId => roles.find(r => r.id === roleId) || {
       id: roleId,
@@ -281,6 +286,13 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
       level: 4
     })
     .filter(Boolean)
+    .filter(role => {
+      // 如果是交辦人，只保留指定的角色
+      if (isAssigner) {
+        return allowedRoleNamesForAssigner.includes(role.name);
+      }
+      return true;
+    })
     .sort((a, b) => {
       // 院長排第一
       if (a.name === '院長' && b.name !== '院長') return -1;
@@ -294,6 +306,14 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
   
   if (selectedRoleId) {
     filteredUsers = filteredUsers.filter(user => userHasRole(user.role, selectedRoleId));
+    
+    // 如果是交辦人且選擇了總務角色，只顯示藍大勝
+    if (isAssigner) {
+      const selectedRole = roles.find(r => r.id === selectedRoleId);
+      if (selectedRole && selectedRole.name === '總務') {
+        filteredUsers = filteredUsers.filter(user => user.name === '藍大勝');
+      }
+    }
   }
   
   // 如果沒有選擇角色但有搜尋關鍵字，搜尋所有角色和人員
@@ -303,15 +323,53 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
     const matchingRoleIds = availableRoles
       .filter(role => role.name.toLowerCase().includes(query))
       .map(role => role.id);
-    // 搜尋人員姓名
+    // 搜尋人員姓名（如果是交辦人，只搜尋屬於允許角色的人員）
     const matchingUserIds = users
-      .filter(user => user.name.toLowerCase().includes(query))
+      .filter(user => {
+        const nameMatch = user.name.toLowerCase().includes(query);
+        if (!nameMatch) return false;
+        // 如果是交辦人，檢查人員是否屬於允許的角色
+        if (isAssigner) {
+          const userRoleIds = getUserRoleIds(user.role);
+          return userRoleIds.some(roleId => {
+            const role = roles.find(r => r.id === roleId);
+            return role && allowedRoleNamesForAssigner.includes(role.name);
+          });
+        }
+        return true;
+      })
       .map(user => user.id);
-    // 合併搜尋結果：顯示匹配角色的所有人員 + 匹配姓名的人員
+    // 合併搜尋結果：顯示匹配角色的所有人員 + 匹配姓名的人員（已過濾）
     filteredUsers = users.filter(user => {
       const userRoleIds = getUserRoleIds(user.role);
-      return userRoleIds.some(roleId => matchingRoleIds.includes(roleId)) || matchingUserIds.includes(user.id);
+      const roleMatch = userRoleIds.some(roleId => matchingRoleIds.includes(roleId));
+      const nameMatch = matchingUserIds.includes(user.id);
+      return roleMatch || nameMatch;
     });
+    
+    // 如果是交辦人且搜尋結果包含總務角色的人員，只顯示藍大勝
+    if (isAssigner) {
+      const hasZongwuRole = filteredUsers.some(user => {
+        const userRoleIds = getUserRoleIds(user.role);
+        return userRoleIds.some(roleId => {
+          const role = roles.find(r => r.id === roleId);
+          return role && role.name === '總務';
+        });
+      });
+      if (hasZongwuRole) {
+        // 如果搜尋結果中有總務角色的人員，只保留藍大勝（如果他在結果中）
+        const lanDasheng = filteredUsers.find(user => user.name === '藍大勝');
+        // 移除所有總務角色的人員，然後只加入藍大勝（如果存在）
+        filteredUsers = filteredUsers.filter(user => {
+          const userRoleIds = getUserRoleIds(user.role);
+          const isZongwu = userRoleIds.some(roleId => {
+            const role = roles.find(r => r.id === roleId);
+            return role && role.name === '總務';
+          });
+          return !isZongwu || user.name === '藍大勝';
+        });
+      }
+    }
   }
 
   const handleSelect = (id: number) => {
@@ -344,7 +402,11 @@ const UserSelector = ({ label, users, roles, selectedId, onSelect, multiple = fa
               <div className="flex flex-wrap gap-2">
                 {availableRoles.map(role => {
                   const RoleIcon = role.icon;
-                  const roleUsers = users.filter(u => userHasRole(u.role, role.id));
+                  let roleUsers = users.filter(u => userHasRole(u.role, role.id));
+                  // 如果是交辦人且角色是總務，只計算藍大勝
+                  if (isAssigner && role.name === '總務') {
+                    roleUsers = roleUsers.filter(u => u.name === '藍大勝');
+                  }
                   return (
                     <button
                       key={role.id}
@@ -553,7 +615,35 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onUpda
   const [isEditingRoleCategory, setIsEditingRoleCategory] = useState(false);
 
   const assigner = users.find(u => u.id === task.assignerId);
-  const assignee = users.find(u => u.id === task.assigneeId);
+  // 支援多個承辦人
+  // 優先從 assigneeIds 讀取，如果沒有或只有一個，則嘗試從 assignee_id 和 collaborator_ids 組合
+  let assigneeIds: number[] = [];
+  
+  // 檢查是否有真正的 assignee_ids（從資料庫的 assignee_ids 欄位讀取，且長度 > 1）
+  const hasRealAssigneeIds = task.assigneeIds !== undefined && task.assigneeIds !== null 
+    && Array.isArray(task.assigneeIds) && task.assigneeIds.length > 1;
+  
+  if (hasRealAssigneeIds && task.assigneeIds) {
+    // 如果資料庫有 assignee_ids 欄位且有多個，直接使用
+    assigneeIds = task.assigneeIds;
+  } else {
+    // 如果沒有真正的 assigneeIds，從 assignee_id 開始
+    if (task.assigneeId) {
+      assigneeIds = [task.assigneeId];
+    }
+    // 檢查 collaborator_ids 中是否有額外的承辦人（可能是臨時保存的）
+    // 注意：這需要確保 collaborator_ids 中的數字 ID 是額外的承辦人
+    if (task.collaboratorIds && Array.isArray(task.collaboratorIds) && task.collaboratorIds.length > 0) {
+      // 過濾出數字類型的 ID（可能是額外的承辦人）
+      const additionalIds = task.collaboratorIds.filter((id: any) => typeof id === 'number') as number[];
+      if (additionalIds.length > 0) {
+        assigneeIds = [...assigneeIds, ...additionalIds];
+      }
+    }
+  }
+  
+  const assignees = assigneeIds.map(id => users.find(u => u.id === id)).filter(Boolean) as User[];
+  const assignee = assignees.length > 0 ? assignees[0] : null; // 向後相容：使用第一個承辦人
 
   const handleSaveResponse = () => {
     onUpdateResponse(task.id, responseEdit);
@@ -632,7 +722,7 @@ const TaskCard = ({ task, users, roles, onUpdateStatus, onUpdateResponse, onUpda
           <div className="w-px h-4 bg-slate-300"></div>
           <div className="flex items-center" title="承辦人">
             <span className="text-xs text-slate-400 mr-1">承辦:</span>
-            <span>{assignee?.name}</span>
+            <span>{assignees.length > 0 ? assignees.map(u => u.name).join('、') : assignee?.name || '未指定'}</span>
           </div>
         </div>
 
@@ -816,7 +906,7 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
         title: '',
         description: '',
         assignerId: null as number | null,
-        assigneeId: null as number | null,
+        assigneeIds: [] as number[],
         collaboratorIds: [] as number[],
         roleCategory: 'medical_admin',
         dates: { plan: getTodayDate(), interim: '', final: '' }
@@ -833,7 +923,7 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
     }, [roles]);
 
     const handleSubmit = () => {
-        if (!formData.title || !formData.assigneeId || !formData.dates.final) {
+        if (!formData.title || formData.assigneeIds.length === 0 || !formData.dates.final) {
             alert('請填寫完整資訊 (標題、承辦人、最終期限)');
             return;
         }
@@ -841,7 +931,8 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
             title: formData.title,
             description: formData.description,
             assignerId: formData.assignerId,
-            assigneeId: formData.assigneeId,
+            assigneeId: formData.assigneeIds[0] || null, // 向後相容：使用第一個承辦人作為主要承辦人
+            assigneeIds: formData.assigneeIds, // 新增：支援多個承辦人
             collaboratorIds: formData.collaboratorIds,
             roleCategory: formData.roleCategory,
             dates: formData.dates,
@@ -869,8 +960,9 @@ const CreateTaskForm = ({ users, roles, onCancel, onCreate }: {
             label="2. 交給誰？ (承辦人)" 
             users={users}
             roles={roles}
-            selectedId={formData.assigneeId}
-            onSelect={(id) => setFormData({...formData, assigneeId: id as number})}
+            selectedIds={formData.assigneeIds}
+            onSelect={(ids) => setFormData({...formData, assigneeIds: ids as number[]})}
+            multiple={true}
         />
 
         <UserSelector 
@@ -1825,6 +1917,38 @@ export default function App() {
       if (result.success) {
         // 等待一下讓後端處理完成
         await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // 根據職類歸屬發送 Google Chat 通知
+        if (newTaskData.roleCategory) {
+          const selectedRole = roles.find(r => r.id === newTaskData.roleCategory);
+          // 使用角色設定的 webhook，如果沒有則使用預設的 Google Chat webhook
+          const webhookUrl = selectedRole?.webhook || 'https://chat.googleapis.com/v1/spaces/AAQAzCi_0Fg/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=AmBMOMsDXhQMO5F_kk5src1Ynfx-J87eT7hZYtFLw58';
+          
+          if (webhookUrl) {
+            // 取得交辦人和承辦人姓名
+            const assigner = users.find(u => u.id === newTaskData.assignerId);
+            const assigneeIds = newTaskData.assigneeIds || (newTaskData.assigneeId ? [newTaskData.assigneeId] : []);
+            const assigneeNames = assigneeIds
+              .map(id => users.find(u => u.id === id)?.name)
+              .filter(Boolean) as string[];
+            
+            // 發送 Google Chat 通知
+            try {
+              await sendGoogleChatNotification(webhookUrl, {
+                title: newTaskData.title,
+                description: newTaskData.description,
+                assignerName: assigner?.name,
+                assigneeNames: assigneeNames,
+                roleCategory: selectedRole?.name || newTaskData.roleCategory,
+                dates: newTaskData.dates
+              });
+            } catch (webhookError) {
+              console.error('發送 Google Chat 通知時發生錯誤:', webhookError);
+              // 通知發送失敗不影響任務創建
+            }
+          }
+        }
+        
         // 重新載入任務列表以確認資料已儲存
         await loadTasks();
         setView('dashboard');

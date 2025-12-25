@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   assigner_name TEXT,
   assignee_id BIGINT,
   assignee_name TEXT,
+  assignee_ids JSONB DEFAULT '[]'::jsonb, -- 支援多個承辦人
   collaborator_ids JSONB DEFAULT '[]'::jsonb,
   role_category TEXT,
   plan_date DATE,
@@ -37,6 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_role_category ON tasks(role_category);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks(assignee_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigner_id ON tasks(assigner_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee_ids ON tasks USING GIN (assignee_ids); -- 支援多個承辦人的索引
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
 -- 啟用 Row Level Security (RLS)

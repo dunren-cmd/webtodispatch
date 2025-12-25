@@ -27,7 +27,8 @@ export interface Task {
   title: string;
   description: string;
   assignerId: number | null;
-  assigneeId: number | null;
+  assigneeId: number | null; // 向後相容：主要承辦人
+  assigneeIds?: number[]; // 新增：支援多個承辦人
   collaboratorIds: number[];
   roleCategory: string;
   dates: {
@@ -125,13 +126,34 @@ function createHeaders(): HeadersInit {
  * 轉換 Supabase 任務資料格式為前端格式
  */
 function transformTaskFromSupabase(task: any): Task {
+  // 處理 collaborator_ids：確保是陣列格式
+  let collaboratorIds: number[] = [];
+  if (task.collaborator_ids) {
+    if (Array.isArray(task.collaborator_ids)) {
+      collaboratorIds = task.collaborator_ids;
+    } else if (typeof task.collaborator_ids === 'string') {
+      // 如果是字串，嘗試解析 JSON
+      try {
+        collaboratorIds = JSON.parse(task.collaborator_ids);
+      } catch (e) {
+        console.warn('無法解析 collaborator_ids:', e);
+        collaboratorIds = [];
+      }
+    }
+  }
+  
   return {
     id: task.id,
     title: task.title || '',
     description: task.description || '',
     assignerId: task.assigner_id || null,
     assigneeId: task.assignee_id || null,
-    collaboratorIds: task.collaborator_ids || [],
+    // 只有在資料庫真的有 assignee_ids 欄位時才使用，否則設為 undefined
+    // 這樣前端可以判斷是否需要從 collaborator_ids 讀取額外的承辦人
+    assigneeIds: task.assignee_ids !== undefined && task.assignee_ids !== null 
+      ? (Array.isArray(task.assignee_ids) ? task.assignee_ids : []) 
+      : undefined,
+    collaboratorIds: collaboratorIds,
     roleCategory: task.role_category || '',
     dates: {
       plan: task.plan_date || '',
@@ -148,12 +170,16 @@ function transformTaskFromSupabase(task: any): Task {
  * 轉換前端任務資料格式為 Supabase 格式
  */
 function transformTaskToSupabase(task: Partial<Task>): any {
-  return {
+  // 處理 assignee_ids：確保總是有一個有效的陣列
+  const assigneeIdsArray = task.assigneeIds || (task.assigneeId ? [task.assigneeId] : []);
+  
+  // 構建基本資料物件
+  const taskData: any = {
     id: task.id || Date.now(),
     title: task.title || '',
     description: task.description || '',
     assigner_id: task.assignerId || null,
-    assignee_id: task.assigneeId || null,
+    assignee_id: task.assigneeId || (assigneeIdsArray.length > 0 ? assigneeIdsArray[0] : null), // 向後相容：主要承辦人
     collaborator_ids: task.collaboratorIds || [],
     role_category: task.roleCategory || '',
     plan_date: task.dates?.plan || null,
@@ -163,11 +189,85 @@ function transformTaskToSupabase(task: Partial<Task>): any {
     assignee_response: task.assigneeResponse || '',
     evidence: task.evidence || []
   };
+  
+  // 暫時不發送 assignee_ids 欄位，直到資料庫更新完成
+  // 注意：執行 SQL 添加 assignee_ids 欄位後，取消下面這行的註解
+  // SQL 檔案：添加assignee_ids欄位.sql 或 supabase/migrations/20250101000000_add_assignee_ids.sql
+  // taskData.assignee_ids = assigneeIdsArray.length > 0 ? assigneeIdsArray : [];
+  
+  // 臨時方案：如果有多個承辦人，將額外的承辦人保存到 collaborator_ids
+  // 這樣可以暫時保存多個承辦人，顯示時會正確組合
+  if (assigneeIdsArray.length > 1) {
+    // 第一個承辦人保存到 assignee_id，其他的保存到 collaborator_ids（作為臨時存儲）
+    const additionalAssignees = assigneeIdsArray.slice(1);
+    // 將額外的承辦人 ID 加入 collaborator_ids
+    // 注意：這會和真正的協作者混合，但這是臨時方案
+    const existingCollaborators = task.collaboratorIds || [];
+    taskData.collaborator_ids = [...existingCollaborators, ...additionalAssignees];
+    console.log('📝 臨時方案：將額外的承辦人保存到 collaborator_ids', additionalAssignees);
+  }
+  
+  return taskData;
 }
 
 // ========================================
 // API 函數
 // ========================================
+
+/**
+ * 發送 Google Chat Webhook 通知
+ */
+export async function sendGoogleChatNotification(webhookUrl: string, message: {
+  title: string;
+  description: string;
+  assignerName?: string;
+  assigneeNames?: string[];
+  roleCategory?: string;
+  dates?: {
+    plan: string;
+    interim: string;
+    final: string;
+  };
+}): Promise<boolean> {
+  try {
+    // Google Chat 的訊息格式
+    const chatMessage = {
+      text: `📋 *新任務交辦*\n\n` +
+            `*標題：* ${message.title}\n` +
+            (message.description ? `*說明：* ${message.description}\n` : '') +
+            (message.assignerName ? `*交辦人：* ${message.assignerName}\n` : '') +
+            (message.assigneeNames && message.assigneeNames.length > 0 
+              ? `*承辦人：* ${message.assigneeNames.join('、')}\n` 
+              : '') +
+            (message.roleCategory ? `*職類歸屬：* ${message.roleCategory}\n` : '') +
+            (message.dates ? 
+              `*日期：*\n` +
+              `  - 計畫：${message.dates.plan || '未設定'}\n` +
+              `  - 期中：${message.dates.interim || '未設定'}\n` +
+              `  - 最終：${message.dates.final || '未設定'}\n`
+              : '')
+    };
+
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(chatMessage),
+    });
+
+    if (!response.ok) {
+      console.error('發送 Google Chat 通知失敗:', response.status, await response.text());
+      return false;
+    }
+
+    console.log('✅ Google Chat 通知已發送');
+    return true;
+  } catch (error) {
+    console.error('發送 Google Chat 通知時發生錯誤:', error);
+    return false;
+  }
+}
 
 /**
  * 建立新任務

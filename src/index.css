@@ -16,3 +16,8 @@ body {
   height: 100vh;
 }
 
+/* 將所有字體大小統一為 16px */
+#root * {
+  font-size: 16px !important;
+}
+
