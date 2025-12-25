@@ -10,6 +10,10 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publisha
 // Supabase REST API 基礎 URL
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${SUPABASE_URL}/rest/v1`;
 
+// Google Apps Script Web App URL（用於上傳圖片到 Google Drive）
+// 請替換為您的 Google Apps Script Web App 部署 URL
+const GOOGLE_APPS_SCRIPT_URL = import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL || '';
+
 // 開發模式下顯示配置資訊
 if (import.meta.env.DEV) {
   console.log('🔧 環境配置：');
@@ -266,6 +270,90 @@ export async function sendGoogleChatNotification(webhookUrl: string, message: {
   } catch (error) {
     console.error('發送 Google Chat 通知時發生錯誤:', error);
     return false;
+  }
+}
+
+/**
+ * 上傳圖片到 Google Drive
+ * @param imageFile - 圖片檔案（File 物件）
+ * @param folderId - Google Drive 資料夾 ID（可選，預設使用指定的資料夾）
+ * @returns 包含 success, fileUrl, fileId 的物件
+ */
+export async function uploadImageToDrive(
+  imageFile: File,
+  folderId?: string
+): Promise<ApiResponse<{ fileUrl: string; fileId: string; fileName: string }>> {
+  try {
+    // 如果沒有設定 Google Apps Script URL，返回錯誤
+    if (!GOOGLE_APPS_SCRIPT_URL) {
+      console.error('❌ 未設定 Google Apps Script URL');
+      return {
+        success: false,
+        error: '未設定 Google Apps Script URL，請設定環境變數 VITE_GOOGLE_APPS_SCRIPT_URL'
+      };
+    }
+
+    // 將檔案轉換為 base64
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // 移除 data:image/...;base64, 前綴
+        const base64 = result.includes(',') ? result.split(',')[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(imageFile);
+    });
+
+    // 從 URL 中提取資料夾 ID
+    // URL 格式：https://drive.google.com/drive/folders/1c7AfFcH5KkhJibHalKN3ElMNh-_S3dY9?usp=drive_link
+    // 資料夾 ID：1c7AfFcH5KkhJibHalKN3ElMNh-_S3dY9
+    const TARGET_FOLDER_ID = '1c7AfFcH5KkhJibHalKN3ElMNh-_S3dY9';
+    const targetFolderId = folderId || TARGET_FOLDER_ID;
+
+    // 發送請求到 Google Apps Script
+    const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'uploadImage',
+        imageData: base64Data,
+        fileName: imageFile.name,
+        folderId: targetFolderId
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    const result = await response.json();
+    
+    if (result.success) {
+      return {
+        success: true,
+        data: {
+          fileUrl: result.fileUrl,
+          fileId: result.fileId,
+          fileName: result.fileName
+        }
+      };
+    } else {
+      return {
+        success: false,
+        error: result.error || '上傳失敗'
+      };
+    }
+  } catch (error) {
+    console.error('上傳圖片時發生錯誤：', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '未知錯誤'
+    };
   }
 }
 

@@ -85,6 +85,10 @@ function doPost(e) {
       // 刪除佐證資料
       const result = deleteEvidence(postData.taskId, postData.evidenceId);
       return createResponse(result);
+    } else if (action === 'uploadImage') {
+      // 上傳圖片到 Google Drive
+      const result = uploadImageToDrive(postData.imageData, postData.fileName, postData.folderId);
+      return createResponse(result);
     } else {
       // 預設為建立任務（向後相容）
       const result = saveTask(postData);
@@ -1671,3 +1675,88 @@ function requestAuthorization() {
   }
 }
 
+
+// ========================================
+// 上傳圖片到 Google Drive
+// ========================================
+/**
+ * 上傳圖片到指定的 Google Drive 資料夾
+ * @param {string} imageData - Base64 編碼的圖片資料（不包含 data:image/...;base64, 前綴）
+ * @param {string} fileName - 檔案名稱
+ * @param {string} folderId - Google Drive 資料夾 ID（從 URL 中提取，例如：1c7AfFcH5KkhJibHalKN3ElMNh-_S3dY9）
+ * @returns {Object} 包含 success, fileUrl, fileId 的物件
+ */
+function uploadImageToDrive(imageData, fileName, folderId) {
+  try {
+    Logger.log('📤 開始上傳圖片到 Google Drive...');
+    Logger.log('📁 目標資料夾 ID：' + folderId);
+    Logger.log('📄 檔案名稱：' + fileName);
+    
+    // 如果 imageData 包含 data:image/...;base64, 前綴，需要移除
+    let base64Data = imageData;
+    if (imageData.includes(',')) {
+      base64Data = imageData.split(',')[1];
+    }
+    
+    // 判斷檔案類型
+    let mimeType = 'image/jpeg'; // 預設為 JPEG
+    if (fileName.toLowerCase().endsWith('.png')) {
+      mimeType = 'image/png';
+    } else if (fileName.toLowerCase().endsWith('.gif')) {
+      mimeType = 'image/gif';
+    } else if (fileName.toLowerCase().endsWith('.webp')) {
+      mimeType = 'image/webp';
+    }
+    
+    // 將 base64 轉換為 Blob
+    const imageBlob = Utilities.newBlob(
+      Utilities.base64Decode(base64Data),
+      mimeType,
+      fileName
+    );
+    
+    // 取得目標資料夾（從 URL 中提取資料夾 ID）
+    // URL 格式：https://drive.google.com/drive/folders/1c7AfFcH5KkhJibHalKN3ElMNh-_S3dY9?usp=drive_link
+    // 資料夾 ID：1c7AfFcH5KkhJibHalKN3ElMNh-_S3dY9
+    const TARGET_FOLDER_ID = '1c7AfFcH5KkhJibHalKN3ElMNh-_S3dY9';
+    const targetFolderId = folderId || TARGET_FOLDER_ID;
+    
+    let folder;
+    try {
+      folder = DriveApp.getFolderById(targetFolderId);
+    } catch (e) {
+      Logger.log('⚠️ 無法取得資料夾，使用根目錄：' + e.toString());
+      folder = DriveApp.getRootFolder();
+    }
+    
+    // 上傳檔案到資料夾
+    const file = folder.createFile(imageBlob);
+    
+    // 設定檔案為「知道連結的使用者可以檢視」
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    
+    // 取得檔案的分享連結
+    const fileUrl = file.getUrl();
+    const fileId = file.getId();
+    
+    Logger.log('✅ 圖片上傳成功！');
+    Logger.log('🔗 檔案連結：' + fileUrl);
+    Logger.log('🆔 檔案 ID：' + fileId);
+    
+    return {
+      success: true,
+      fileUrl: fileUrl,
+      fileId: fileId,
+      fileName: fileName
+    };
+    
+  } catch (error) {
+    Logger.log('❌ 上傳圖片失敗：' + error.toString());
+    Logger.log('錯誤堆疊：' + error.stack);
+    
+    return {
+      success: false,
+      error: error.toString()
+    };
+  }
+}

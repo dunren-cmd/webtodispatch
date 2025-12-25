@@ -46,6 +46,7 @@ import {
   updateUser,
   deleteUser,
   sendGoogleChatNotification,
+  uploadImageToDrive,
   type Task,
   type User,
   type Evidence,
@@ -56,6 +57,20 @@ import {
 
 // 預設角色（已移除，由用戶自行建立）
 const DEFAULT_ROLES: Role[] = [];
+
+// 職類歸屬對應的 Google Chat Webhook URL
+const ROLE_WEBHOOK_MAP: Record<string, string> = {
+  '人資': 'https://chat.googleapis.com/v1/spaces/AAQA_0JjuPs/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=24GE1KFYSUnT2F12gLZbw-HAlNbLqqWJ9ut0Ly-Pa98',
+  '心理': 'https://chat.googleapis.com/v1/spaces/AAQAgZ14dug/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=lZHRYJjR0mnpwl_Hlhf3tL5KZaFVhOSz3Wo-LBEPlvM',
+  '社工': 'https://chat.googleapis.com/v1/spaces/AAQA4krUBaw/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=ZmOHdr_QpnN5-rOXopRkUJh0LBiwV3GybMVegxoPLL8',
+  '總務': 'https://chat.googleapis.com/v1/spaces/AAQAcQjP5iI/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=hydtIcHzBSGZww4XOYoM0WcTFlpe_QdAozlx2DsUuNM',
+  '病歷': 'https://chat.googleapis.com/v1/spaces/AAQA6AyYugA/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=fKJKMCvdDAGxaQhr9LdFwUvNBd-01XZ_vg3qC7dlTPY',
+  '會計': 'https://chat.googleapis.com/v1/spaces/AAQAsm9sWzQ/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=meYJO19NREOF8EeX5UzeuhhZjwPySEZxu0tqtv-kpRg',
+  '職能': 'https://chat.googleapis.com/v1/spaces/AAQAaRHg9lw/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=dWP_RZFN5Zq_OgYJxF1Ui-IZz0LyxSxVQK3kYVYSdQA',
+  '藥局': 'https://chat.googleapis.com/v1/spaces/AAQA6G83nSY/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=hkhwTJ8wa-pe8kLEv3eq_ejoVgg10nSHjHhMWUlbs-Q',
+  '醫師': 'https://chat.googleapis.com/v1/spaces/AAQALNxydno/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=mDaoEHOtVzd1-Sc_CAM4bBmFHVF7HUtoHmC8Cq9tKis',
+  '護理': 'https://chat.googleapis.com/v1/spaces/AAQATOdyqoo/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=JRqOC0YOGba7pEqvYLNYPqEC-KVrPswviIjtVzsGUY8',
+};
 
 // 層級標籤對應（統一為員工）
 const LEVEL_LABELS: Record<number, string> = {
@@ -1921,8 +1936,20 @@ export default function App() {
         // 根據職類歸屬發送 Google Chat 通知
         if (newTaskData.roleCategory) {
           const selectedRole = roles.find(r => r.id === newTaskData.roleCategory);
-          // 使用角色設定的 webhook，如果沒有則使用預設的 Google Chat webhook
-          const webhookUrl = selectedRole?.webhook || 'https://chat.googleapis.com/v1/spaces/AAQAzCi_0Fg/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=AmBMOMsDXhQMO5F_kk5src1Ynfx-J87eT7hZYtFLw58';
+          const roleName = selectedRole?.name || newTaskData.roleCategory;
+          
+          // 優先使用角色設定的 webhook，其次使用職類名稱對應的 webhook，最後使用預設 webhook
+          let webhookUrl = selectedRole?.webhook;
+          
+          if (!webhookUrl && roleName) {
+            // 從映射表中查找對應的 webhook
+            webhookUrl = ROLE_WEBHOOK_MAP[roleName];
+          }
+          
+          // 如果還是沒有，使用預設的 Google Chat webhook
+          if (!webhookUrl) {
+            webhookUrl = 'https://chat.googleapis.com/v1/spaces/AAQAzCi_0Fg/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=AmBMOMsDXhQMO5F_kk5src1Ynfx-J87eT7hZYtFLw58';
+          }
           
           if (webhookUrl) {
             // 取得交辦人和承辦人姓名
@@ -1939,7 +1966,7 @@ export default function App() {
                 description: newTaskData.description,
                 assignerName: assigner?.name,
                 assigneeNames: assigneeNames,
-                roleCategory: selectedRole?.name || newTaskData.roleCategory,
+                roleCategory: roleName,
                 dates: newTaskData.dates
               });
             } catch (webhookError) {
@@ -2243,14 +2270,58 @@ export default function App() {
             newEvidence = { id, type: 'link', name, url };
         }
     } else if (type === 'image') {
-        // Simulating upload
-        newEvidence = { 
-            id, 
-            type: 'image', 
-            name: '上傳圖片.jpg', 
-            url: 'https://via.placeholder.com/300x200?text=Uploaded+Image' 
-        };
-        alert('已模擬圖片上傳');
+        // 建立隱藏的 file input
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.style.display = 'none';
+        document.body.appendChild(input);
+        
+        // 等待用戶選擇檔案
+        const selectedFile = await new Promise<File | null>((resolve) => {
+            const handleChange = (e: Event) => {
+                const file = (e.target as HTMLInputElement).files?.[0] || null;
+                input.removeEventListener('change', handleChange);
+                document.body.removeChild(input);
+                resolve(file);
+            };
+            
+            input.addEventListener('change', handleChange);
+            input.click();
+            
+            // 如果用戶點擊其他地方（取消），在短時間後清理
+            setTimeout(() => {
+                if (document.body.contains(input)) {
+                    input.removeEventListener('change', handleChange);
+                    document.body.removeChild(input);
+                    resolve(null);
+                }
+            }, 100);
+        });
+        
+        if (!selectedFile) {
+            // 用戶取消選擇
+            return;
+        }
+        
+        // 顯示上傳中提示
+        alert('正在上傳圖片到 Google Drive...');
+        
+        // 上傳圖片到 Google Drive
+        const uploadResult = await uploadImageToDrive(selectedFile);
+        
+        if (uploadResult.success && uploadResult.data) {
+            newEvidence = { 
+                id, 
+                type: 'image', 
+                name: uploadResult.data.fileName, 
+                url: uploadResult.data.fileUrl
+            };
+            alert('圖片上傳成功！');
+        } else {
+            alert('圖片上傳失敗：' + (uploadResult.error || '未知錯誤'));
+            return;
+        }
     }
 
     if (newEvidence) {
